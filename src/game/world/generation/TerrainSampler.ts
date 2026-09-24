@@ -1,4 +1,5 @@
 import { BIOME_IDS, type BiomeId } from "./biomes";
+import { WATER_LEVEL } from "../../config";
 import { SimplexNoise, clamp, smoothstep } from "./noise";
 
 /** Result of sampling the world at one point. Reuse one object to avoid allocations in hot loops. */
@@ -24,6 +25,7 @@ export class TerrainSampler {
   private readonly ridges: SimplexNoise;
   private readonly hills: SimplexNoise;
   private readonly dunes: SimplexNoise;
+  private readonly lakes: SimplexNoise;
   private readonly scratch = createSample();
 
   constructor(readonly seed: number) {
@@ -33,6 +35,7 @@ export class TerrainSampler {
     this.ridges = new SimplexNoise(seed + 4);
     this.hills = new SimplexNoise(seed + 5);
     this.dunes = new SimplexNoise(seed + 6);
+    this.lakes = new SimplexNoise(seed + 7);
   }
 
   sample(x: number, z: number, out: TerrainSample): TerrainSample {
@@ -67,6 +70,15 @@ export class TerrainSampler {
     if (mountain > 0.001) {
       const ridge = 1 - Math.abs(this.ridges.fbm(x * 0.0025, z * 0.0025, 5));
       height += mountain * (22 + ridge * ridge * 85);
+    }
+
+    // Lakes: wherever the lake noise is high, the ground melts into a basin that dips below the water
+    // level. Mountains and deserts (apart from the odd oasis) keep their shape.
+    const lake = this.lakes.fbm(x * 0.0016 + 300, z * 0.0016 - 300, 2) * 1.6;
+    const carve = smoothstep(0.32, 0.5, lake) * (1 - mountain) * (1 - 0.8 * w[1]) * (1 - smoothstep(18, 32, height));
+    if (carve > 0.001) {
+      const floor = WATER_LEVEL - 0.6 - 5.5 * smoothstep(0.4, 0.95, lake);
+      if (height > floor) height += (floor - height) * carve;
     }
 
     out.height = height;

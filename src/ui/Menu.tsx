@@ -59,9 +59,9 @@ export function Menu() {
           {tab === "home" && (
             <div className="space-y-5">
               <p className="text-sm leading-relaxed text-text-secondary">
-                Wander through forests, deserts, frozen peaks and swamps that are generated as you walk. Find ruins,
-                shrines, standing stones and camps, follow the lights at night, and climb the floating stones to the
-                islands in the sky. The world is different for every seed.
+                Wander through forests, deserts, frozen peaks and swamps that are generated as you walk. Swim and dive in
+                its lakes, explore windmills, shrines, docks and camps, collect crystal shards to glide, follow the
+                lights at night, and climb the floating stones to the islands in the sky. The world is different for every seed.
               </p>
               {ready ? (
                 <Button variant="primary" className="w-full py-3 text-base" onClick={() => game?.requestPlay()} autoFocus>

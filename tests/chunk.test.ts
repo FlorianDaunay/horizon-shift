@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_SIZE, DEFAULT_SEED, LOD_RESOLUTIONS } from "../src/game/config";
+import { CHUNK_SIZE, DEFAULT_SEED, LOD_RESOLUTIONS, WATER_LEVEL } from "../src/game/config";
 import { chunkIndices, chunkVertexCount, surfaceHeightFn } from "../src/game/world/generation/chunkMesh";
 import { generateChunk } from "../src/game/world/generation/generateChunk";
 import { SCATTER_FULL } from "../src/game/world/generation/scatter";
-import { COLLIDER_STRIDE } from "../src/game/world/generation/collision";
-import { POI_TYPES, findPoi } from "../src/game/world/generation/poi";
+import { COLLIDER_STRIDE, INTERACT_STRIDE } from "../src/game/world/generation/collision";
+import { DECK_HEIGHT, POI_TYPES, findDock, findPoi } from "../src/game/world/generation/poi";
 import { TerrainSampler } from "../src/game/world/generation/TerrainSampler";
 import { INSTANCE_CAPACITY } from "../src/game/world/instances/kinds";
 
@@ -160,5 +160,84 @@ describe("floating islands", () => {
       }
     }
     expect(checked).toBeGreaterThan(3);
+  });
+});
+
+describe("docks", () => {
+  const sampler = new TerrainSampler(DEFAULT_SEED);
+  const spots: [number, number][] = [];
+  for (let cx = -60; cx < 60 && spots.length < 6; cx++) for (let cz = -60; cz < 60 && spots.length < 6; cz++) if (findDock(sampler, cx, cz)) spots.push([cx, cz]);
+
+  const positionsOf = (r: ReturnType<typeof generateChunk>, kind: string) => {
+    const b = r.batches.find((x) => x.kind === kind);
+    return Array.from({ length: b?.count ?? 0 }, (_, i) => ({ x: b!.matrices[i * 16 + 12], y: b!.matrices[i * 16 + 13], z: b!.matrices[i * 16 + 14] }));
+  };
+
+  it("exist on lakes", () => {
+    expect(spots.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("have a hut, a boat and a pier that stays in its chunk, is continuous and ends on dry land", () => {
+    for (const [cx, cz] of spots) {
+      const r = generateChunk({ id: 1, seed: DEFAULT_SEED, cx, cz, lod: 0, scatter: SCATTER_FULL });
+      expect(r.poi?.type).toBe("dock");
+      expect(positionsOf(r, "cabin")).toHaveLength(1);
+      expect(positionsOf(r, "boat")).toHaveLength(1);
+
+      const hut = { x: r.poi!.x - cx * CHUNK_SIZE, z: r.poi!.z - cz * CHUNK_SIZE };
+      const fromHut = (p: { x: number; z: number }) => Math.hypot(p.x - hut.x, p.z - hut.z);
+      const all = positionsOf(r, "plank");
+      for (const p of all) {
+        expect(p.x).toBeGreaterThan(0);
+        expect(p.x).toBeLessThan(CHUNK_SIZE);
+        expect(p.z).toBeGreaterThan(0);
+        expect(p.z).toBeLessThan(CHUNK_SIZE);
+        expect(p.y).toBeCloseTo(WATER_LEVEL + DECK_HEIGHT, 5);
+      }
+      // The deck under the hut is one big plank; the pier is the rest, in order of distance from it.
+      const planks = all.filter((p) => fromHut(p) > 0.5).sort((a, b) => fromHut(a) - fromHut(b));
+      expect(all.length - planks.length).toBe(1);
+      expect(fromHut(planks[0])).toBeLessThan(3); // joins the deck (radius ~2.5 m)
+      // Each plank is within reach of the previous one, so the pier can be walked without jumping.
+      for (let i = 1; i < planks.length; i++) expect(Math.hypot(planks[i].x - planks[i - 1].x, planks[i].z - planks[i - 1].z)).toBeLessThan(1.8);
+      const end = planks[planks.length - 1];
+      expect(sampler.heightAt(cx * CHUNK_SIZE + end.x, cz * CHUNK_SIZE + end.z)).toBeGreaterThan(WATER_LEVEL - 0.05);
+    }
+  });
+});
+
+describe("watchtowers", () => {
+  it("can be climbed by a stair of planks up to a platform", () => {
+    const sampler = new TerrainSampler(DEFAULT_SEED);
+    let checked = 0;
+    for (let cx = -60; cx < 60 && checked < 4; cx++) {
+      for (let cz = -60; cz < 60 && checked < 4; cz++) {
+        if (findPoi(sampler, cx, cz)?.type !== "watchtower") continue;
+        checked++;
+        const r = generateChunk({ id: 1, seed: DEFAULT_SEED, cx, cz, lod: 0, scatter: SCATTER_FULL });
+        const planks = r.batches.find((b) => b.kind === "plank")!;
+        const all = Array.from({ length: planks.count }, (_, i) => ({ y: planks.matrices[i * 16 + 13], scale: planks.matrices[i * 16] ** 2 + planks.matrices[i * 16 + 2] ** 2 }));
+        const platform = all.reduce((a, b) => (b.y > a.y ? b : a));
+        const stairs = all.filter((p) => p !== platform).sort((a, b) => a.y - b.y);
+        expect(stairs.length).toBeGreaterThan(3);
+        for (let i = 1; i < stairs.length; i++) expect(stairs[i].y - stairs[i - 1].y).toBeLessThanOrEqual(1.4);
+        expect(platform.y - stairs[stairs.length - 1].y).toBeLessThanOrEqual(1.4);
+      }
+    }
+    expect(checked).toBeGreaterThan(1);
+  });
+});
+
+describe("interactables", () => {
+  it("offer crystals, chests, bells and campfires", () => {
+    const types = new Set<number>();
+    for (let cx = -25; cx < 25; cx++) {
+      for (let cz = -25; cz < 25; cz++) {
+        const r = generateChunk({ id: 1, seed: DEFAULT_SEED, cx, cz, lod: 2, scatter: 1 });
+        expect(r.interactables.length % INTERACT_STRIDE).toBe(0);
+        for (let i = 0; i < r.interactables.length; i += INTERACT_STRIDE) types.add(r.interactables[i + 3]);
+      }
+    }
+    expect([...types].sort()).toEqual([0, 1, 2, 3]);
   });
 });

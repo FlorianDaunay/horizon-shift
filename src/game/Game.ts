@@ -3,6 +3,9 @@ import { Atmosphere } from "./atmosphere/Atmosphere";
 import { Fireflies } from "./atmosphere/Fireflies";
 import { LightPool } from "./atmosphere/LightPool";
 import { AudioEngine } from "./audio/AudioEngine";
+import { WATER_LEVEL } from "./config";
+import { Interactions } from "./Interactions";
+import { Progress } from "./Progress";
 import { Emitter } from "./core/Emitter";
 import { createFrame } from "./input/actions";
 import { InputManager } from "./input/InputManager";
@@ -19,6 +22,7 @@ import { DEFAULT_SETTINGS, type GameSettings } from "./settings";
 import type { BiomeId } from "./world/generation/biomes";
 import { findSpawn } from "./world/spawn";
 import { createSample } from "./world/generation/TerrainSampler";
+import { Fish } from "./world/Fish";
 import { World } from "./world/World";
 
 /** A snapshot of the game for HUDs and debug overlays. */
@@ -40,12 +44,25 @@ export interface GameStats {
   ready: boolean;
   locked: boolean;
   muted: boolean;
+  /** In deep water. */
+  swimming: boolean;
+  /** Head under water. */
+  underwater: boolean;
+  /** 0..1, air left while diving. */
+  oxygen: number;
+  /** Crystal shards collected (they fuel the glide). */
+  shards: number;
+  gliding: boolean;
+  /** What pressing E would do, or null. */
+  prompt: string | null;
 }
 
 export interface GameEvents {
   stats: GameStats;
   /** The pointer was captured (playing) or released (menu). */
   pointerLock: boolean;
+  /** A short message to show for a moment. */
+  toast: string;
 }
 
 const STATS_INTERVAL = 0.25;
@@ -69,6 +86,9 @@ export class Game {
   private readonly audio = new AudioEngine();
   private readonly fireflies = new Fireflies();
   private readonly lights: LightPool;
+  private readonly fish: Fish;
+  private readonly progress: Progress;
+  private readonly interactions: Interactions;
   private readonly moodSample = createSample();
   private readonly followCamera: ThirdPersonCamera;
   private readonly post: PostProcessing;
@@ -90,6 +110,8 @@ export class Game {
   /** Smoothed 0..1 factors from the surroundings: how many fireflies, how windy. */
   private fireflyLevel = 0;
   private windiness = 0;
+  /** 0 above water .. 1 with the camera under the surface (smoothed, so crossing the surface fades). */
+  private waterAmount = 0;
 
   constructor(private readonly container: HTMLElement, settings: GameSettings = DEFAULT_SETTINGS) {
     this.settings = { ...settings };
@@ -118,6 +140,18 @@ export class Game {
     this.followCamera = new ThirdPersonCamera(this.camera, this.world);
     this.scene.add(this.avatar.root, this.fireflies.points);
     this.lights = new LightPool(this.scene, this.world, 2);
+    this.fish = new Fish(this.scene, (x, z) => this.world.heightAt(x, z));
+    this.progress = new Progress(this.world.taken);
+    this.progress.load(this.settings.seed);
+    this.interactions = new Interactions(
+      this.world,
+      this.player,
+      this.audio,
+      this.atmosphere,
+      this.progress,
+      () => this.settings.seed,
+      (message) => this.events.emit("toast", message)
+    );
     this.avatar.root.traverse((o) => (o.receiveShadow = false));
     this.post = new PostProcessing(this.renderer, this.scene, this.camera);
 
@@ -158,6 +192,7 @@ export class Game {
     }
     if (s.seed !== previous.seed) {
       this.world.reseed(s.seed);
+      this.progress.load(s.seed);
       this.ready = false;
       this.respawn();
     }
@@ -207,17 +242,29 @@ export class Game {
 
     const input = this.input.update(dt); // always polled, so buffered mouse movement never piles up
     const playing = this.ready && this.pointerLock.locked;
-    const activeInput = playing ? input : this.idleInput;
+    // While resting by a fire, time flies and the controls are frozen.
+    const active = playing && !this.interactions.resting;
+    const activeInput = active ? input : this.idleInput;
 
     if (playing) {
-      this.player.update(dt, input, this.followCamera.yaw);
+      this.player.canGlide = this.progress.shards > 0;
+      this.player.update(dt, activeInput, this.followCamera.yaw);
       this.playSounds();
+      if (this.player.glideTime > 0) {
+        const glided = this.player.glideTime;
+        this.player.glideTime = 0;
+        if (this.progress.spendGlide(glided)) {
+          this.progress.save(this.settings.seed);
+          if (this.progress.shards === 0) this.events.emit("toast", "Out of shards: no more gliding");
+        }
+      }
       if (input.buttons.resetCamera.pressed) this.followCamera.alignBehind(this.player.heading);
       if (input.buttons.toggleMute.pressed) {
         this.muted = !this.muted;
         this.audio.setVolumes({ muted: this.muted });
       }
     }
+    this.interactions.update(dt, playing, input);
 
     const { position } = this.player;
     const daylight = this.atmosphere.daylight;
@@ -225,13 +272,17 @@ export class Game {
     this.clock += dt;
 
     this.followCamera.update(dt, activeInput, position, this.player.sprinting);
+    this.updateWater(dt);
     this.world.update(dt, position, daylight);
     this.atmosphere.update(playing ? dt : 0, position, this.camera);
+    (this.scene.background as Color).copy(this.atmosphere.fog.color); // what shows when the sky is hidden under water
     this.avatar.update(playing ? dt : 0, this.player, night);
     this.lights.update(dt, position, night);
+    this.fish.update(dt, this.clock, position, this.player.swimming);
     this.updateMood(dt, position.x, position.z);
-    this.fireflies.update(this.clock, position, this.fireflyLevel * night * night);
-    this.audio.update(dt, { daylight, altitude: position.y, windiness: this.windiness, paused: !playing });
+    this.fireflies.update(this.clock, position, this.fireflyLevel * night * night * (1 - this.waterAmount));
+    this.audio.update(dt, { daylight, altitude: position.y, windiness: this.windiness * (1 - this.waterAmount), paused: !playing });
+    this.post.setUnderwater(this.waterAmount, this.clock);
 
     if (!this.ready && this.world.isReady()) {
       this.ready = true;
@@ -254,9 +305,20 @@ export class Game {
     }
   }
 
+  /** Smooths the "camera is under water" state, then applies it to the fog, sky, picture and sound. */
+  private updateWater(dt: number): void {
+    const camera = this.camera.position;
+    const submerged = camera.y < WATER_LEVEL - 0.03 && this.world.heightAt(camera.x, camera.z) < WATER_LEVEL;
+    this.waterAmount += ((submerged ? 1 : 0) - this.waterAmount) * Math.min(1, dt * 10);
+    this.atmosphere.setUnderwater(this.waterAmount);
+    this.audio.setUnderwater(this.waterAmount > 0.5);
+  }
+
   /** Footsteps, jumps and landings, with the sound of whatever the player is on. */
   private playSounds(): void {
     const { events, position } = this.player;
+    if (events.splash > 0) this.audio.splash(events.splash);
+    if (events.stroke) this.audio.stroke();
     if (!events.step && !events.jump && events.land === 0) return;
     const surface = this.player.onObject ? "stone" : this.player.inWater ? "water" : this.world.surfaceAt(position.x, position.z);
     if (events.jump) this.audio.jump(surface);
@@ -299,6 +361,12 @@ export class Game {
       ready: this.ready,
       locked: this.pointerLock.locked,
       muted: this.muted,
+      swimming: this.player.swimming,
+      underwater: this.player.headUnderwater,
+      oxygen: this.player.oxygen,
+      shards: this.progress.shards,
+      gliding: this.player.gliding,
+      prompt: this.interactions.prompt,
     };
   }
 
@@ -314,6 +382,7 @@ export class Game {
     this.audio.dispose();
     this.fireflies.dispose();
     this.lights.dispose();
+    this.fish.dispose();
     this.post.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

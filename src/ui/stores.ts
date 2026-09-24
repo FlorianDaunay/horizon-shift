@@ -33,9 +33,11 @@ interface RuntimeState {
   locked: boolean;
   /** True once the player has entered the world at least once (the menu then says "Resume"). */
   started: boolean;
+  /** The latest short message, shown briefly by the HUD. */
+  toast: { id: number; text: string } | null;
   /** Set when the game could not start (e.g. WebGL unavailable). */
   error: string | null;
 }
 
 /** Live game state pushed by the game; never persisted. */
-export const useRuntime = create<RuntimeState>(() => ({ stats: null, locked: false, started: false, error: null }));
+export const useRuntime = create<RuntimeState>(() => ({ stats: null, locked: false, started: false, toast: null, error: null }));

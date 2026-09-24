@@ -1,5 +1,5 @@
 import { INSTANCE_CAPACITY, INSTANCE_KINDS, type InstanceKind } from "../instances/kinds";
-import { COLLISION, EMITTERS } from "./collision";
+import { COLLISION, EMITTERS, INTERACTIONS } from "./collision";
 
 /** Instance data of one kind for one chunk, ready to upload: 16 floats (matrix) + 3 floats (tint) per instance. */
 export interface InstanceBatch {
@@ -22,6 +22,7 @@ export class InstanceCollector {
   private readonly counts = new Map<InstanceKind, number>();
   private readonly colliders: number[] = [];
   private readonly emitters: number[] = [];
+  private readonly interactables: number[] = [];
   /** Highest point reached by any instance. */
   maxY = -Infinity;
 
@@ -70,6 +71,8 @@ export class InstanceCollector {
     COLLISION[kind]?.(sx, sy, sz, (dx, dz, radius, base, top, standable) => {
       this.colliders.push(x + c * dx + s * dz, z - s * dx + c * dz, radius, y + base, y + top, standable ? 1 : 0);
     });
+    const interaction = INTERACTIONS[kind]?.(sy);
+    if (interaction) this.interactables.push(x + interaction[0], y + interaction[1], z + interaction[2], interaction[3], INSTANCE_KINDS.indexOf(kind), count);
     const emitter = EMITTERS[kind]?.(sy);
     if (emitter) this.emitters.push(x + emitter[0], y + emitter[1], z + emitter[2], emitter[3]);
     return true;
@@ -92,6 +95,10 @@ export class InstanceCollector {
 
   finishColliders(): Float32Array {
     return new Float32Array(this.colliders);
+  }
+
+  finishInteractables(): Float32Array {
+    return new Float32Array(this.interactables);
   }
 
   finishEmitters(): Float32Array {

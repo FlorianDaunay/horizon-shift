@@ -21,6 +21,7 @@ const GROUND: [Rgb, Rgb][] = [
 ];
 const ROCK = linear(0x746e69);
 const MUD = linear(0x5a4c36);
+const LAKEBED = linear(0x1c4b57);
 
 /**
  * Terrain vertex color from biome weights, altitude, steepness and a `variation` noise value in
@@ -61,6 +62,12 @@ export function terrainColor(
   r += (MUD[0] - r) * mudAmount;
   g += (MUD[1] - g) * mudAmount;
   b += (MUD[2] - b) * mudAmount;
+
+  // Below the surface the ground turns from muddy shallows into the dark teal of deep water.
+  const deep = 1 - smoothstep(WATER_LEVEL - 4.5, WATER_LEVEL - 0.2, height);
+  r += (LAKEBED[0] - r) * deep * 0.85;
+  g += (LAKEBED[1] - g) * deep * 0.85;
+  b += (LAKEBED[2] - b) * deep * 0.85;
 
   out[offset] = r;
   out[offset + 1] = g;

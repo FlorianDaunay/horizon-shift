@@ -29,6 +29,7 @@ export function GameHost({ children }: { children: ReactNode }) {
     const offLock = instance.events.on("pointerLock", (locked) =>
       useRuntime.setState((state) => ({ locked, started: state.started || locked }))
     );
+    const offToast = instance.events.on("toast", (text) => useRuntime.setState({ toast: { id: Date.now(), text } }));
     const offSettings = useSettings.subscribe((state) => instance.applySettings(state.settings));
     instance.start();
     if (import.meta.env.DEV) (window as unknown as { __game?: Game }).__game = instance; // handy in the console
@@ -37,6 +38,7 @@ export function GameHost({ children }: { children: ReactNode }) {
     return () => {
       offStats();
       offLock();
+      offToast();
       offSettings();
       instance.dispose();
       setGame(null);

@@ -26,6 +26,17 @@ export const INSTANCE_KINDS = [
   "crystal",
   "floatStone",
   "islandBase",
+  "plank",
+  "post",
+  "cabin",
+  "windmillBlades",
+  "headstone",
+  "bell",
+  "chest",
+  "boat",
+  "well",
+  "lilyPad",
+  "reed",
 ] as const;
 
 export type InstanceKind = (typeof INSTANCE_KINDS)[number];
@@ -53,4 +64,15 @@ export const INSTANCE_CAPACITY: Record<InstanceKind, number> = {
   crystal: 32,
   floatStone: 64,
   islandBase: 4,
+  plank: 64,
+  post: 40,
+  cabin: 6,
+  windmillBlades: 2,
+  headstone: 24,
+  bell: 4,
+  chest: 8,
+  boat: 4,
+  well: 4,
+  lilyPad: 140,
+  reed: 90,
 };

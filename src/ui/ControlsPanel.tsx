@@ -9,6 +9,9 @@ const ROWS: { keys: ReactNode; action: string }[] = [
   { keys: <Kbd>Space</Kbd>, action: "Jump (a sprint jump keeps its speed in the air)" },
   { keys: <span className="text-xs text-text-secondary">Wheel</span>, action: "Zoom the camera (also − and +)" },
   { keys: <Kbd>R</Kbd>, action: "Put the camera back behind you" },
+  { keys: <Kbd>E</Kbd>, action: "Interact: collect crystals, open chests, ring bells, rest by fires" },
+  { keys: <><Kbd>C</Kbd><Kbd>Space</Kbd></>, action: "In deep water: dive / rise. Space at the surface hops out onto docks, boats and banks" },
+  { keys: <span className="text-xs text-text-secondary">hold Space in the air</span>, action: "Glide (each crystal shard pays for a few seconds)" },
   { keys: <Kbd>M</Kbd>, action: "Mute or unmute music and sounds" },
   { keys: <Kbd>Esc</Kbd>, action: "Pause and open the menu" },
 ];

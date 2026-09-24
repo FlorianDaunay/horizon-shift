@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BIOME_LABELS, type GameStats } from "../game";
 import { Kbd } from "./kit";
-import { useSettings } from "./stores";
+import { useRuntime, useSettings } from "./stores";
 
 const POI_LABELS: Record<string, string> = {
   ruins: "Ruins",
@@ -13,6 +13,13 @@ const POI_LABELS: Record<string, string> = {
   shrine: "Shrine",
   arch: "Ancient arch",
   island: "Floating island",
+  windmill: "Windmill",
+  well: "Old well",
+  hut: "Woodcutter's hut",
+  graveyard: "Graveyard",
+  giantTree: "Ancient tree",
+  watchtower: "Watchtower",
+  dock: "Lake dock",
 };
 
 const formatHour = (hour: number) => {
@@ -40,6 +47,15 @@ export function Hud({ stats }: { stats: GameStats }) {
     return () => window.clearTimeout(timer);
   }, []);
 
+  const toast = useRuntime((state) => state.toast);
+  const [shownToast, setShownToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    setShownToast(toast.text);
+    const timer = window.setTimeout(() => setShownToast(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const poi = stats.nearestPoi && stats.nearestPoi.distance < 140 ? stats.nearestPoi : null;
 
   return (
@@ -49,6 +65,13 @@ export function Hud({ stats }: { stats: GameStats }) {
           <span className="font-medium">{BIOME_LABELS[stats.biome]}</span>
           <span className="ml-3 font-mono text-text-secondary">{formatHour(stats.hour)}</span>
         </Chip>
+        {stats.shards > 0 && (
+          <Chip>
+            <span className="text-accent">◇</span> <span className="font-mono">{stats.shards}</span>{" "}
+            <span className="text-text-muted">shard{stats.shards > 1 ? "s" : ""}</span>
+            {stats.gliding && <span className="ml-2 text-xs text-accent">gliding</span>}
+          </Chip>
+        )}
         {poi && (
           <Chip>
             <span className="text-accent">◆</span> {POI_LABELS[poi.type] ?? poi.type}{" "}
@@ -79,6 +102,27 @@ export function Hud({ stats }: { stats: GameStats }) {
               {stats.position.map((v) => v.toFixed(0)).join(", ")}
             </div>
           </div>
+        )}
+      </div>
+
+      {(stats.swimming || stats.oxygen < 0.999) && (
+        <div className="absolute bottom-28 left-1/2 w-56 -translate-x-1/2" role="meter" aria-label="Air" aria-valuenow={Math.round(stats.oxygen * 100)}>
+          <div className="mb-1 flex justify-between text-xs text-text-secondary">
+            <span>{stats.underwater ? "Air" : "Swimming"}</span>
+            {stats.oxygen < 0.25 && <span className="text-danger">running out</span>}
+          </div>
+          <div className="h-2 overflow-hidden rounded-pill border bg-surface/70">
+            <div className={`h-full transition-all ${stats.oxygen < 0.25 ? "bg-danger" : "bg-accent"}`} style={{ width: `${stats.oxygen * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="absolute bottom-16 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
+        {shownToast && <Chip>{shownToast}</Chip>}
+        {stats.prompt && (
+          <Chip>
+            <Kbd>E</Kbd> <span className="ml-1">{stats.prompt}</span>
+          </Chip>
         )}
       </div>
 

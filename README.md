@@ -4,8 +4,8 @@ A procedural 3D nature exploration game that runs entirely in your browser. No b
 the build is a static site hosted on GitHub Pages.
 
 Walk (third person) through forests, deserts, frozen peaks and swamps that are generated around you as you
-move. Find ruins, shrines, standing stones, camps and caves, follow the lights at night, and climb a spiral of
-floating stones to the islands drifting in the sky. Everything, including the lo-fi music and the footsteps, is
+move. Swim and dive in the lakes, explore windmills, docks, shrines and camps, follow the lights at night, collect
+crystal shards to glide, and climb a spiral of floating stones to the islands drifting in the sky. Everything, including the lo-fi music and the footsteps, is
 generated in the browser.
 
 ## Controls
@@ -19,6 +19,9 @@ generated in the browser.
 | `Space`                    | Jump                                                |
 | Mouse wheel, `-` / `+`     | Zoom the camera                                     |
 | `R`                        | Put the camera back behind you                      |
+| `E`                        | Interact (collect, open, ring, rest)                |
+| `C` / `Space`              | Dive / rise in deep water; `Space` at the surface hops out |
+| hold `Space` in the air    | Glide (needs crystal shards)                        |
 | `M`                        | Mute or unmute music and sounds                     |
 | `Esc`                      | Release the mouse and open the menu                 |
 

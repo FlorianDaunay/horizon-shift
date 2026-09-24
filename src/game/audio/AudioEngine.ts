@@ -38,6 +38,7 @@ export class AudioEngine {
   private sfx: Sfx | null = null;
   private volumes: AudioVolumes = { music: 0.4, sfx: 0.6, muted: false };
   private paused = true;
+  private underwater = false;
 
   /** Creates (or resumes) the audio context. Call from a click or key press. */
   start(): void {
@@ -85,7 +86,7 @@ export class AudioEngine {
     this.musicBus.gain.setTargetAtTime(muted ? 0 : music * 0.9, t, 0.15);
     this.sfxBus.gain.setTargetAtTime(muted ? 0 : sfx, t, 0.05);
     this.master.gain.setTargetAtTime(this.paused ? 0.55 : 1, t, 0.3);
-    this.muffle.frequency.setTargetAtTime(this.paused ? 900 : 20000, t, 0.25);
+    this.muffle.frequency.setTargetAtTime(this.paused ? 900 : this.underwater ? 520 : 20000, t, 0.2);
   }
 
   update(dt: number, mood: AudioMood): void {
@@ -96,6 +97,33 @@ export class AudioEngine {
     }
     this.music?.setMood(mood.daylight);
     this.ambience?.update(dt, mood);
+  }
+
+  /** Head under water: everything turns dull and distant. */
+  setUnderwater(underwater: boolean): void {
+    if (underwater === this.underwater) return;
+    this.underwater = underwater;
+    this.applyVolumes();
+  }
+
+  splash(speed: number): void {
+    this.sfx?.splash(speed);
+  }
+
+  stroke(): void {
+    this.sfx?.stroke();
+  }
+
+  pickup(): void {
+    this.sfx?.pickup();
+  }
+
+  chest(): void {
+    this.sfx?.chest();
+  }
+
+  bell(): void {
+    this.sfx?.bell();
   }
 
   footstep(surface: Surface, sprinting: boolean): void {

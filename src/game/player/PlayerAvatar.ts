@@ -154,25 +154,36 @@ export class PlayerAvatar {
     const intensity = Math.min(1, speed / 6);
     this.phase += dt * (3 + speed * 1.15);
     const swing = Math.sin(this.phase) * intensity;
-    const air = player.grounded ? 0 : 1;
+    const swimming = player.swimming;
+    const gliding = player.gliding;
+    const air = player.grounded || swimming ? 0 : 1;
+    // Diving: heading down, or with the head already under. At the surface the swimmer stays upright.
+    const diving = swimming && (player.headUnderwater || player.velocity.y < -0.4);
 
-    // Feet step; the cloak sways and the whole body leans into a sprint.
-    this.feet[0].position.z = 0.05 + swing * 0.26 * (1 - air);
-    this.feet[1].position.z = 0.05 - swing * 0.26 * (1 - air);
-    this.feet[0].position.y = 0.08 + Math.max(0, Math.cos(this.phase)) * 0.09 * intensity + air * 0.12;
-    this.feet[1].position.y = 0.08 + Math.max(0, -Math.cos(this.phase)) * 0.09 * intensity + air * 0.12;
-    this.body.position.y = Math.abs(Math.sin(this.phase)) * 0.05 * intensity;
-    this.body.rotation.x += ((player.sprinting ? 0.22 : 0.05 * intensity) - this.body.rotation.x) * Math.min(1, dt * 8);
+    // Feet step (or kick when swimming); the cloak sways and the body leans into a sprint, a dive or a glide.
+    const kick = swimming ? Math.sin(this.phase * 1.3) * 0.5 : swing * 0.26 * (1 - air);
+    this.feet[0].position.z = 0.05 + kick;
+    this.feet[1].position.z = 0.05 - kick;
+    this.feet[0].position.y = 0.08 + Math.max(0, Math.cos(this.phase)) * 0.09 * intensity * (swimming ? 0 : 1) + air * 0.12;
+    this.feet[1].position.y = 0.08 + Math.max(0, -Math.cos(this.phase)) * 0.09 * intensity * (swimming ? 0 : 1) + air * 0.12;
+    this.body.position.y = swimming ? 0 : Math.abs(Math.sin(this.phase)) * 0.05 * intensity;
+    const lean = diving ? 1.25 : swimming ? 0.3 + intensity * 0.25 : gliding ? 0.45 : player.sprinting ? 0.22 : 0.05 * intensity;
+    this.body.rotation.x += (lean - this.body.rotation.x) * Math.min(1, dt * 7);
     this.cloak.rotation.z = swing * 0.05;
-    this.cloak.scale.set(1 + Math.sin(this.time * 1.6) * 0.012, 1 + air * 0.04, 1 + Math.sin(this.time * 1.6) * 0.012);
+    const flare = gliding ? 1.16 : 1;
+    this.cloak.scale.set(flare + Math.sin(this.time * 1.6) * 0.012, 1 + air * 0.04, flare + Math.sin(this.time * 1.6) * 0.012);
 
-    // Arms: free arm swings, the staff arm holds still-ish; both go up in the air.
-    this.arms[0].rotation.x = -0.35 + swing * 0.15 - air * 0.9; // the staff arm
-    this.arms[1].rotation.x = -swing * 0.6 - air * 1.2;
+    // Arms: the staff arm holds the staff, the other swings; swimming strokes; gliding spreads both wide.
+    const stroke = swimming ? Math.sin(this.phase * 1.3) * 1.3 : 0;
+    this.arms[0].rotation.x = swimming ? -0.5 + stroke * 0.4 : -0.35 + swing * 0.15 - air * 0.9;
+    this.arms[1].rotation.x = swimming ? -stroke : -swing * 0.6 - air * 1.2;
+    const spread = this.arms[0].rotation.z + ((gliding ? -1.35 : 0) - this.arms[0].rotation.z) * Math.min(1, dt * 9);
+    this.arms[0].rotation.z = spread;
+    this.arms[1].rotation.z = -spread;
     this.staff.rotation.x = swing * 0.06 - air * 0.15;
 
     // Scarf: trails behind, streams out with speed and ripples.
-    const streaming = -0.15 - intensity * 0.5 - air * 0.3;
+    const streaming = -0.15 - intensity * 0.5 - air * 0.3 - (gliding ? 0.35 : 0) + (diving ? 0.9 : 0);
     for (let i = 0; i < this.scarf.length; i++) {
       const wave = Math.sin(this.time * (4 + speed * 0.4) - i * 0.9);
       this.scarf[i].rotation.x = streaming * (i === 0 ? 1.4 : 0.55) + wave * (0.08 + intensity * 0.16);

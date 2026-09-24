@@ -53,6 +53,11 @@ export class Atmosphere {
   private readonly hemiDay = new Color(0xbcd8ff);
   private time = 0;
   private shadowSize = 0;
+  private baseNear = 100;
+  private baseFar = 400;
+  private readonly waterColor = new Color(0x0e5a6e);
+  /** 0 above water, 1 fully submerged: dense teal fog and no sky. */
+  private underwater = 0;
 
   constructor(private readonly scene: Scene, startHour = 9.5) {
     this.hour = startHour;
@@ -69,6 +74,11 @@ export class Atmosphere {
     this.sun.shadow.normalBias = 0.35;
   }
 
+  /** How submerged the camera is (0..1); the sky gives way to dense teal water. */
+  setUnderwater(amount: number): void {
+    this.underwater = amount;
+  }
+
   /** Jumps to a time of day (hours since midnight). */
   setHour(hour: number): void {
     this.hour = ((hour % 24) + 24) % 24;
@@ -81,8 +91,10 @@ export class Atmosphere {
 
   /** Where fog starts and ends, as a fraction of the view distance. */
   setViewDistance(distance: number): void {
-    this.fog.near = distance * 0.3;
-    this.fog.far = distance * 0.92;
+    this.baseNear = distance * 0.3;
+    this.baseFar = distance * 0.92;
+    this.fog.near = this.baseNear;
+    this.fog.far = this.baseFar;
   }
 
   /** 0 turns shadows off. */
@@ -110,7 +122,12 @@ export class Atmosphere {
     this.sky.update(this.time, this.zenith, this.horizon, this.sunDir, this.sunColor, night);
     this.sky.mesh.position.copy(camera.position);
 
-    this.fog.color.copy(this.horizon);
+    // Underwater the fog closes in and takes the water's color, lit a little by the day.
+    const dim = 0.35 + 0.65 * this.daylight;
+    this.fog.color.copy(this.horizon).lerp(this.colorA.copy(this.waterColor).multiplyScalar(dim), this.underwater);
+    this.fog.near = this.baseNear + (0.5 - this.baseNear) * this.underwater;
+    this.fog.far = this.baseFar + (46 - this.baseFar) * this.underwater;
+    this.sky.mesh.visible = this.underwater < 0.5;
 
     this.sun.color.copy(this.sunColor);
     this.sun.intensity = 2.8 * smooth(-0.02, 0.25, e);

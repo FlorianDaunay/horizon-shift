@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
+### Added
+
+- **Lakes** carved into the terrain, with a rippling water surface, dark teal lake beds, lily pads and reeds.
+- **Swimming and diving**: deep water is swum (`Shift` swims faster), `C` dives and `Space` rises. There is
+  air for about 30 seconds under water; when it runs out the water lifts you up. `Space` at the surface hops
+  out onto docks, boats and banks. Underwater the sky gives way to dense teal fog, the picture wobbles and turns
+  blue-green, and the sound goes muffled. Splashes and strokes are audible, and there are fish that avoid the
+  shore and flee from swimmers.
+- **Interactions** (`E`): collect crystal shards, open chests, ring bells, and rest by a campfire until dusk or
+  dawn. Prompts appear on the HUD; used crystals and chests stay gone (saved per world seed).
+- **Glide**: hold `Space` in the air to float down slowly. Each crystal shard pays for a few seconds.
+- **Seven new structures**: windmill (with turning sails), old well, woodcutter's hut, graveyard, ancient tree,
+  watchtower (climbable by a stair of planks) and a stilt-hut dock with a pier and a boat on lakes. Bells hang in
+  arches, and chests are hidden at most structures.
+- A swimming and a gliding pose for the character.
+
+### Fixed
+
+- A quick key tap on a slow frame is no longer lost (taps are latched until the next input poll).
+
+### Changed
+
+- Terrain colouring turns from mud into dark teal below the water line.
+- Hopping out of the water is a full-strength jump.
+
+
 ## [0.2.0] - 2026-09-25
 
 ### Added
@@ -52,6 +80,7 @@ First playable version.
 - React + Tailwind interface (menu, HUD, settings) driven by the theme system, with dozens of themes.
 - GitHub Actions for CI, deployment to GitHub Pages, and tagged releases.
 
-[Unreleased]: https://github.com/floriandaunay/horizon-shift/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/floriandaunay/horizon-shift/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/floriandaunay/horizon-shift/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/floriandaunay/horizon-shift/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/floriandaunay/horizon-shift/releases/tag/v0.1.0

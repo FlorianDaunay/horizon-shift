@@ -16,6 +16,8 @@ export class KeyboardMouseSource implements InputSource {
   readonly id = "keyboard-mouse";
 
   private readonly down = new Set<string>();
+  /** Keys pressed since the last poll, even if already released: a quick tap on a slow frame is not lost. */
+  private readonly tapped = new Set<string>();
   private readonly stopLock: () => void;
   private mouseX = 0;
   private mouseY = 0;
@@ -26,6 +28,7 @@ export class KeyboardMouseSource implements InputSource {
     // Only game keys are captured, and only while playing, so the UI keeps normal keyboard behaviour.
     if (!this.pointerLock.locked) return;
     this.down.add(event.code);
+    this.tapped.add(event.code);
     if (this.isBound(event.code)) event.preventDefault();
   };
   private readonly onKeyUp = (event: KeyboardEvent) => {
@@ -58,6 +61,7 @@ export class KeyboardMouseSource implements InputSource {
   poll(dt: number, sample: InputSample): void {
     const { axes, buttons } = sample;
     const held = (codes: readonly string[]) => codes.some((code) => this.down.has(code));
+    const pressedOrTapped = (codes: readonly string[]) => codes.some((code) => this.down.has(code) || this.tapped.has(code));
 
     for (const [axis, binding] of Object.entries(this.bindings.axes)) {
       const value = (held(binding.positive) ? 1 : 0) - (held(binding.negative) ? 1 : 0);
@@ -65,8 +69,9 @@ export class KeyboardMouseSource implements InputSource {
       axes[axis as keyof typeof axes] += value * scale;
     }
     for (const [button, codes] of Object.entries(this.bindings.buttons)) {
-      if (held(codes)) buttons[button as keyof typeof buttons] = true;
+      if (pressedOrTapped(codes)) buttons[button as keyof typeof buttons] = true;
     }
+    this.tapped.clear();
 
     axes.lookX += this.mouseX * MOUSE_RADIANS_PER_PIXEL;
     axes.lookY -= this.mouseY * MOUSE_RADIANS_PER_PIXEL; // mouse up = look up
@@ -76,6 +81,7 @@ export class KeyboardMouseSource implements InputSource {
 
   reset(): void {
     this.down.clear();
+    this.tapped.clear();
     this.mouseX = this.mouseY = this.wheel = 0;
   }
 

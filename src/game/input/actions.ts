@@ -19,7 +19,7 @@ export const AXIS_ACTIONS = [
 ] as const;
 
 /** On/off actions. */
-export const BUTTON_ACTIONS = ["jump", "sprint", "resetCamera", "toggleMute"] as const;
+export const BUTTON_ACTIONS = ["jump", "sprint", "resetCamera", "toggleMute", "interact", "dive"] as const;
 
 export type AxisAction = (typeof AXIS_ACTIONS)[number];
 export type ButtonAction = (typeof BUTTON_ACTIONS)[number];

@@ -12,7 +12,7 @@ import {
 import { CHUNK_SIZE, LOD_RESOLUTIONS } from "../config";
 import { ObjectPool } from "../core/ObjectPool";
 import { chunkIndices, chunkVertexCount } from "./generation/chunkMesh";
-import { COLLIDER_STRIDE, EMITTER_STRIDE } from "./generation/collision";
+import { COLLIDER_STRIDE, EMITTER_STRIDE, INTERACTIONS, INTERACT_STRIDE } from "./generation/collision";
 import type { ChunkResult } from "./generation/generateChunk";
 import type { Island } from "./generation/islands";
 import type { Poi } from "./generation/poi";
@@ -29,7 +29,11 @@ export class ChunkView {
   /** Collision circles and light spots in world coordinates (see `generation/collision.ts`). */
   colliders: Float32Array = new Float32Array(0);
   emitters: Float32Array = new Float32Array(0);
+  /** Things to interact with, in world coordinates (see `generation/collision.ts`). */
+  interactables: Float32Array = new Float32Array(0);
   poi: Poi | null = null;
+  /** Used interactables to hide once the instanced meshes exist. */
+  pendingHide: (readonly [number, number])[] = [];
   island: Island | null = null;
 
   constructor(
@@ -92,7 +96,39 @@ export class ChunkViewFactory {
     ])
   );
 
-  constructor(private readonly scene: Scene) {}
+  /**
+   * `isTaken` tells whether an interactable (chunk, kind, instance) has already been used, so it stays
+   * gone when the chunk is generated again.
+   */
+  constructor(
+    private readonly scene: Scene,
+    private readonly isTaken: (cx: number, cz: number, kindIndex: number, instance: number) => boolean = () => false
+  ) {}
+
+  /** Hides one instance (a collected crystal, an opened chest) and turns off its collision, light and prompt. */
+  hide(view: ChunkView, kindIndex: number, instance: number): void {
+    const kind = INSTANCE_KINDS[kindIndex];
+    const mesh = view.instanced.find((m) => m.userData.kind === kind);
+    if (mesh && instance < mesh.count) {
+      const array = mesh.instanceMatrix.array as Float32Array;
+      array[instance * 16] = array[instance * 16 + 5] = array[instance * 16 + 10] = 0; // scale to nothing
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(instance * 16, 16);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    const spots = view.interactables;
+    for (let i = 0; i < spots.length; i += INTERACT_STRIDE) {
+      if (spots[i + 4] !== kindIndex || spots[i + 5] !== instance) continue;
+      const [x, y, z] = [spots[i], spots[i + 1], spots[i + 2]];
+      spots[i + 3] = -1;
+      for (let j = 0; j < view.emitters.length; j += EMITTER_STRIDE) {
+        if (Math.abs(view.emitters[j] - x) < 0.01 && Math.abs(view.emitters[j + 1] - y) < 0.01 && Math.abs(view.emitters[j + 2] - z) < 0.01) view.emitters[j + 3] = -1;
+      }
+      for (let j = 0; j < view.colliders.length; j += COLLIDER_STRIDE) {
+        if (Math.abs(view.colliders[j] - x) < 0.01 && Math.abs(view.colliders[j + 1] - z) < 0.01) view.colliders[j + 2] = 0;
+      }
+    }
+  }
 
   /** Creates the view of a chunk from a worker result. */
   build(result: ChunkResult): ChunkView {
@@ -127,7 +163,12 @@ export class ChunkViewFactory {
     const instanceRadius = Math.hypot(CHUNK_SIZE / 2, CHUNK_SIZE / 2, (top - result.minY) / 2);
 
     // Collision and light data arrive chunk-local; keep them in world coordinates.
-    const { colliders, emitters } = result;
+    const { colliders, emitters, interactables } = result;
+    for (let i = 0; i < interactables.length; i += INTERACT_STRIDE) {
+      interactables[i] += x;
+      interactables[i + 2] += z;
+    }
+    view.interactables = interactables;
     for (let i = 0; i < colliders.length; i += COLLIDER_STRIDE) {
       colliders[i] += x;
       colliders[i + 1] += z;
@@ -138,6 +179,7 @@ export class ChunkViewFactory {
     }
     view.colliders = colliders;
     view.emitters = emitters;
+    view.pendingHide = [];
     view.poi = result.poi;
     view.island = result.island;
 
@@ -165,6 +207,10 @@ export class ChunkViewFactory {
         attribute.needsUpdate = true;
       }
       mesh.count = batch.count;
+      if (INTERACTIONS[batch.kind]) {
+        const kindIndex = INSTANCE_KINDS.indexOf(batch.kind);
+        view.pendingHide.push(...Array.from({ length: batch.count }, (_, i) => i).filter((i) => this.isTaken(result.cx, result.cz, kindIndex, i)).map((i) => [kindIndex, i] as const));
+      }
       mesh.boundingSphere!.center.set(CHUNK_SIZE / 2, instanceCenterY, CHUNK_SIZE / 2);
       mesh.boundingSphere!.radius = instanceRadius;
       mesh.position.set(x, 0, z);
@@ -172,6 +218,8 @@ export class ChunkViewFactory {
       this.scene.add(mesh);
       view.instanced.push(mesh);
     }
+    for (const [kindIndex, instance] of view.pendingHide) this.hide(view, kindIndex, instance);
+    view.pendingHide = [];
   }
 
   /** Frees the GPU memory of every pooled object (used when the game shuts down). */

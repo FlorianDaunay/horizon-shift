@@ -36,6 +36,8 @@ export interface ChunkResult {
   colliders: Float32Array;
   /** Light spots (see `collision.ts`); coordinates are chunk-local. */
   emitters: Float32Array;
+  /** Things to interact with (see `collision.ts`); coordinates are chunk-local. */
+  interactables: Float32Array;
   /** Highest point of any instance, for the culling volume. */
   instanceMaxY: number;
   poi: Poi | null;
@@ -79,6 +81,7 @@ export function generateChunk(request: ChunkRequest): ChunkResult {
     batches: instances.finish(),
     colliders: instances.finishColliders(),
     emitters: instances.finishEmitters(),
+    interactables: instances.finishInteractables(),
     instanceMaxY: instances.maxY,
     poi,
     island,
@@ -87,7 +90,7 @@ export function generateChunk(request: ChunkRequest): ChunkResult {
 
 /** Buffers to hand over (not copy) when posting a result from a worker. */
 export function transferables(result: ChunkResult): ArrayBuffer[] {
-  const buffers = [result.positions.buffer, result.normals.buffer, result.colors.buffer, result.colliders.buffer, result.emitters.buffer] as ArrayBuffer[];
+  const buffers = [result.positions.buffer, result.normals.buffer, result.colors.buffer, result.colliders.buffer, result.emitters.buffer, result.interactables.buffer] as ArrayBuffer[];
   for (const batch of result.batches) buffers.push(batch.matrices.buffer as ArrayBuffer, batch.tints.buffer as ArrayBuffer);
   return buffers;
 }

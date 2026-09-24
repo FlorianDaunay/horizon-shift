@@ -55,6 +55,69 @@ export class Sfx {
     this.thump((hit.thump ?? 90) * 0.8, now, 0.32 * force, 0.16);
   }
 
+  /** Diving in: a burst of water proportional to how fast the player hit it. */
+  splash(speed: number): void {
+    const force = Math.min(1.4, 0.35 + speed / 9);
+    const now = this.ctx.currentTime;
+    this.burst({ filter: "bandpass", frequency: 800, q: 0.8, attack: 0.01, decay: 0.42, level: 0.55 }, now, force);
+    this.burst({ filter: "highpass", frequency: 3200, q: 0.7, attack: 0.005, decay: 0.28, level: 0.3 }, now, force);
+    this.thump(120, now, 0.25 * force, 0.2);
+  }
+
+  /** A swimming stroke: a soft, low wash. */
+  stroke(): void {
+    this.burst({ filter: "lowpass", frequency: 950, q: 1, attack: 0.06, decay: 0.32, level: 0.17 }, this.ctx.currentTime, 0.8 + Math.random() * 0.4);
+  }
+
+  /** A short, bright two-note chime: something was collected. */
+  pickup(): void {
+    const now = this.ctx.currentTime;
+    this.tone(880, now, 0.5, 0.11);
+    this.tone(1318.5, now + 0.09, 0.7, 0.1);
+  }
+
+  /** A creaking lid, then a little fanfare. */
+  chest(): void {
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.linearRampToValueAtTime(150, now + 0.5);
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 500;
+    filter.Q.value = 4;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.08, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.55);
+    osc.connect(filter).connect(gain).connect(this.output);
+    osc.start(now);
+    osc.stop(now + 0.6);
+    [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, now + 0.5 + i * 0.09, 0.9, 0.09));
+  }
+
+  /** A large bronze bell: inharmonic partials with long decays. */
+  bell(): void {
+    const now = this.ctx.currentTime;
+    const base = 196 * (0.97 + Math.random() * 0.06);
+    [[1, 0.16, 4.5], [2.0, 0.1, 3.2], [2.76, 0.12, 2.6], [5.4, 0.06, 1.6], [8.93, 0.03, 1]].forEach(([ratio, level, decay]) => this.tone(base * ratio, now, decay, level));
+  }
+
+  /** A soft-attack sine that rings out. */
+  private tone(frequency: number, when: number, decay: number, level: number): void {
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = frequency;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(level, when + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0005, when + decay);
+    osc.connect(gain).connect(this.output);
+    osc.start(when);
+    osc.stop(when + decay + 0.05);
+  }
+
   private burst(hit: Hit, when: number, boost: number): void {
     const source = this.ctx.createBufferSource();
     source.buffer = this.noise;

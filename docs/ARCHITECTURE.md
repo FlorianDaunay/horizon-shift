@@ -83,7 +83,7 @@ The world is a pure function of a seed.
 `scatter.ts`, `poi.ts` or `islands.ts`.
 
 **Adding a structure**: add its name to `POI_TYPES`, its per-biome odds to `TABLE`, its radius to `RADIUS` and a
-builder to `BUILDERS` in `poi.ts`.
+builder to `BUILDERS` in `poi.ts`. Stairs up to a platform can reuse `spiralStairs` (`generation/stairs.ts`).
 
 ## Atmosphere and rendering
 
@@ -106,6 +106,32 @@ builder to `BUILDERS` in `poi.ts`.
   that keeps failing.
 - `quality.ts` defines what each level means (view radius, vegetation and grass radius, shadow map size, render
   scale, post-processing). Adding a level is adding a row.
+
+## Water and swimming
+
+- **Lakes** are part of the pure height function: `TerrainSampler` carves basins where a low-frequency noise is
+  high (not in mountains, rarely in deserts), so the workers and the physics agree. The water is one plane at
+  `WATER_LEVEL` that follows the player; its normals ripple in a fragment shader and it is double-sided, so from
+  below it is the ceiling of the underwater world. `terrainColor` darkens the ground below the surface.
+- **Swimming** lives in `PlayerController.swimStep`. The player swims when the feet are more than a meter under
+  the surface over water: no gravity, buoyancy towards `SURFACE_LEVEL` (head just above the water), `Space` and
+  `C` rise and dive, the lake floor and object tops stop a dive, and running out of air (`oxygen`) makes the
+  water lift the player. Pressing jump at the surface hops out (a swim lock stops it re-entering at once).
+  `Game.updateWater` turns "camera is under the surface" into a smoothed 0..1 that drives the fog (dense teal,
+  no sky), the post-processing wobble and tint, and a muffled mix in `AudioEngine`.
+- **Fish** (`world/Fish.ts`) is one `InstancedMesh` of a few dozen fish moved on the CPU: they stay in deep water,
+  turn away from the shore and flee from a swimmer.
+- **Lake structures**: `findDock` looks for a spot in deep water with a shore within 30 m inside the chunk; the
+  pier is a row of planks whose top is `WATER_LEVEL + DECK_HEIGHT`, low enough to hop onto from the water.
+
+## Interactions and progress
+
+`collision.ts` declares which kinds are interactable (`INTERACTIONS`: crystal, chest, bell, campfire);
+`InstanceCollector.add` records their position, type, kind and instance index. `ChunkManager.nearestInteractable`
+finds the closest one; `Interactions` (the "press E" layer) shows the prompt and acts. Used items are stored as
+`chunk,kind,instance` keys in `World.taken`, which `ChunkViewFactory` consults whenever a chunk is (re)built, so
+they stay hidden (instance scaled to nothing, collision, light and prompt removed). `Progress` keeps the shards and
+the taken set in `localStorage` per world seed. Shards fuel the glide (`PlayerController.canGlide`).
 
 ## Audio (`src/game/audio`)
 

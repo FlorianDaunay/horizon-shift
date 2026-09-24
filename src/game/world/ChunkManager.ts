@@ -1,7 +1,7 @@
 import type { Scene, Vector3 } from "three";
 import { CHUNK_SIZE } from "../config";
 import { ChunkView, ChunkViewFactory } from "./ChunkView";
-import { COLLIDER_STRIDE, EMITTER_STRIDE } from "./generation/collision";
+import { COLLIDER_STRIDE, EMITTER_STRIDE, INTERACT_STRIDE } from "./generation/collision";
 import { chunkKey, type ChunkRequest, type ChunkResult } from "./generation/generateChunk";
 import { SCATTER_FULL } from "./generation/scatter";
 import TerrainWorker from "./workers/terrain.worker?worker";
@@ -13,6 +13,20 @@ export interface StreamingConfig {
   vegetationRadius: number;
   grassRadius: number;
 }
+
+/** Describes something the player can interact with (filled in by `nearestInteractable`). */
+export interface InteractHit {
+  type: number;
+  x: number;
+  y: number;
+  z: number;
+  kindIndex: number;
+  instance: number;
+  cx: number;
+  cz: number;
+}
+
+export const createInteractHit = (): InteractHit => ({ type: 0, x: 0, y: 0, z: 0, kindIndex: 0, instance: 0, cx: 0, cz: 0 });
 
 export interface StreamingStats {
   loaded: number;
@@ -72,9 +86,10 @@ export class ChunkManager {
   constructor(
     scene: Scene,
     private seed: number,
-    private config: StreamingConfig
+    private config: StreamingConfig,
+    private readonly taken: Set<string> = new Set()
   ) {
-    this.factory = new ChunkViewFactory(scene);
+    this.factory = new ChunkViewFactory(scene, (cx, cz, kind, instance) => this.taken.has(`${cx},${cz},${kind},${instance}`));
     this.workers = new WorkerPool(() => new TerrainWorker(), defaultWorkerCount(), 2, (result) => this.onResult(result));
   }
 
@@ -253,6 +268,7 @@ export class ChunkManager {
         const e = this.views.get(chunkKey(cx + dx, cz + dz))?.emitters;
         if (!e) continue;
         for (let i = 0; i < e.length; i += EMITTER_STRIDE) {
+          if (e[i + 3] < 0) continue; // its crystal was taken
           const d2 = (e[i] - x) ** 2 + (e[i + 1] - y) ** 2 + (e[i + 2] - z) ** 2;
           if (d2 > limit) continue;
           let slot = found < slots ? found : slots - 1;
@@ -271,6 +287,44 @@ export class ChunkManager {
       }
     }
     return found;
+  }
+
+  /** Finds the nearest thing to interact with within `range` and describes it in `out`; false if none. */
+  nearestInteractable(x: number, y: number, z: number, range: number, out: InteractHit): boolean {
+    let best = range * range;
+    let found = false;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const view = this.views.get(chunkKey(cx + dx, cz + dz));
+        const s = view?.interactables;
+        if (!view || !s) continue;
+        for (let i = 0; i < s.length; i += INTERACT_STRIDE) {
+          if (s[i + 3] < 0) continue;
+          const d2 = (s[i] - x) ** 2 + (s[i + 1] - y) ** 2 + (s[i + 2] - z) ** 2;
+          if (d2 >= best) continue;
+          best = d2;
+          found = true;
+          out.type = s[i + 3];
+          out.x = s[i];
+          out.y = s[i + 1];
+          out.z = s[i + 2];
+          out.kindIndex = s[i + 4];
+          out.instance = s[i + 5];
+          out.cx = view.cx;
+          out.cz = view.cz;
+        }
+      }
+    }
+    return found;
+  }
+
+  /** Uses up an interactable: it disappears and stays gone. */
+  take(hit: InteractHit): void {
+    this.taken.add(`${hit.cx},${hit.cz},${hit.kindIndex},${hit.instance}`);
+    const view = this.views.get(chunkKey(hit.cx, hit.cz));
+    if (view) this.factory.hide(view, hit.kindIndex, hit.instance);
   }
 
   /** The landmark (structure or floating island) closest to (x, z) among loaded chunks, if any. */

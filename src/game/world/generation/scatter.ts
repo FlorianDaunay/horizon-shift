@@ -11,6 +11,7 @@ export const SCATTER_FULL = 2; // ... plus grass
 
 const TREE_CELL = 6;
 const GRASS_CELL = 1.6;
+const WATER_CELL = 3;
 
 const jitterTint = (rng: () => number, r: number, g: number, b: number): [number, number, number] => {
   const v = 0.85 + rng() * 0.3;
@@ -92,6 +93,30 @@ export function scatterChunk(
       if (slope < 1.6 && rollKind < rockChance && roll > 0.4) {
         const s = 0.5 + rollSize * 1.6;
         out.add("rock", x, y0 - s * 0.25, z, rollYaw * 6.28, s, s * (0.6 + rollSize * 0.5), s * (0.8 + rollKind), jitterTint(rng, 1, 1, 1));
+      }
+    }
+  }
+
+  // Water life: lily pads floating on calm water, reeds along the shore.
+  for (let gz = 0; gz < CHUNK_SIZE / WATER_CELL; gz++) {
+    for (let gx = 0; gx < CHUNK_SIZE / WATER_CELL; gx++) {
+      const x = (gx + rng()) * WATER_CELL;
+      const z = (gz + rng()) * WATER_CELL;
+      const roll = rng();
+      const rollYaw = rng();
+      const rollSize = rng();
+      const wx = ox + x;
+      const wz = oz + z;
+      sampler.sample(wx, wz, sample);
+      const h = sample.height;
+      if (h > WATER_LEVEL + 0.8 || h < WATER_LEVEL - 3 || nearPoi(x, z)) continue;
+      const wet = w[0] * 0.6 + w[3] * 1.2; // forests and swamps; deserts and snow stay bare
+      if (wet < 0.1 || patchNoise.fbm(wx * 0.06, wz * 0.06, 2) < -0.1) continue;
+      if (h < WATER_LEVEL - 0.35) {
+        if (roll < 0.2 * wet) out.add("lilyPad", x, WATER_LEVEL + 0.03, z, rollYaw * 6.28, 0.8 + rollSize * 0.7, 1, 0.8 + rollSize * 0.7, [1, 1, 1]);
+      } else if (h > WATER_LEVEL - 0.15 && roll < 0.4 * wet) {
+        const s = 0.8 + rollSize * 0.6;
+        out.add("reed", x, surface(x, z) - 0.05, z, rollYaw * 6.28, s, s, s, [0.95, 1, 0.9]);
       }
     }
   }

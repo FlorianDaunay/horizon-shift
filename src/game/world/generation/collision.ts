@@ -13,6 +13,13 @@ export const EMITTER_FIRE = 0;
 export const EMITTER_MAGIC = 1;
 export const EMITTER_LANTERN = 2;
 
+/** Layout of one interactable thing: `x, y, z, type, kind index, instance index within its kind`. */
+export const INTERACT_STRIDE = 6;
+export const INTERACT_COLLECT = 0;
+export const INTERACT_OPEN = 1;
+export const INTERACT_RING = 2;
+export const INTERACT_REST = 3;
+
 /** Adds a circle: `dx, dz` are offsets in the instance's own (unrotated) axes, `base`/`top` relative to its origin. */
 type Push = (dx: number, dz: number, radius: number, base: number, top: number, standable: boolean) => void;
 
@@ -37,6 +44,21 @@ export const COLLISION: Partial<Record<InstanceKind, (sx: number, sy: number, sz
   crystal: (sx, sy, _sz, push) => push(0, 0, 0.35 * sx, -0.5, 1.7 * sy, false),
   floatStone: (sx, _sy, _sz, push) => push(0, 0, 1.25 * sx, -0.5, 0, true),
   islandBase: (sx, sy, _sz, push) => push(0, 0, 0.94 * sx, -1.4 * sy, 0, true),
+  plank: (sx, _sy, sz, push) => push(0, 0, 0.95 * Math.max(sx, sz), -0.6, 0, true),
+  post: (sx, sy, _sz, push) => push(0, 0, 0.17 * sx, -1, sy, false),
+  cabin: (sx, sy, _sz, push) => push(0, 0, 1.75 * sx, -1, 2.6 * sy, false),
+  headstone: (sx, sy, _sz, push) => push(0, 0, 0.32 * sx, -1, sy, false),
+  chest: (_sx, _sy, _sz, push) => push(0, 0, 0.5, -1, 0.6, false),
+  boat: (sx, _sy, sz, push) => push(0, 0, 1.3 * Math.max(sx, sz * 0.5), -0.5, 0.35, true),
+  well: (sx, sy, _sz, push) => push(0, 0, 1.0 * sx, -1, 0.9 * sy, false),
+};
+
+/** Kinds the player can interact with: offset of the interaction point and what happens. */
+export const INTERACTIONS: Partial<Record<InstanceKind, (sy: number) => [number, number, number, number]>> = {
+  crystal: (sy) => [0, 0.9 * sy, 0, INTERACT_COLLECT],
+  chest: () => [0, 0.5, 0, INTERACT_OPEN],
+  bell: () => [0, 0, 0, INTERACT_RING],
+  campfire: () => [0, 0.4, 0, INTERACT_REST],
 };
 
 /** Light-emitting kinds: local offset of the light and its type. */

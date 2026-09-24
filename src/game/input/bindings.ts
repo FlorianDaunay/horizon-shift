@@ -29,5 +29,7 @@ export const defaultKeyBindings: KeyBindings = {
     sprint: ["ShiftLeft", "ShiftRight"],
     resetCamera: ["KeyR"],
     toggleMute: ["KeyM"],
+    interact: ["KeyE"],
+    dive: ["KeyC"],
   },
 };

@@ -1,11 +1,47 @@
-import { MathUtils, Mesh, MeshPhongMaterial, PlaneGeometry, type Scene, type Vector3 } from "three";
+import { DoubleSide, MathUtils, Mesh, MeshPhongMaterial, PlaneGeometry, type Scene, type Vector3 } from "three";
 import { CHUNK_SIZE, DEFAULT_SEED, WATER_LEVEL } from "../config";
 import type { QualityProfile } from "../performance/quality";
-import { ChunkManager } from "./ChunkManager";
+import { ChunkManager, type InteractHit } from "./ChunkManager";
 import type { BiomeId } from "./generation/biomes";
 import { TerrainSampler, type TerrainSample } from "./generation/TerrainSampler";
 import { glowLevel, windTime } from "./instances/models";
 import { surfaceAt, type Surface } from "./generation/surface";
+
+/**
+ * The water surface: a translucent Phong material whose normals ripple, so the sun glints on it.
+ * It is double-sided, so from below it is the shimmering ceiling of the underwater world.
+ */
+function createWaterMaterial(): MeshPhongMaterial {
+  const material = new MeshPhongMaterial({
+    color: 0x2f7f8d,
+    specular: 0xbfe2ee,
+    shininess: 110,
+    transparent: true,
+    opacity: 0.66,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = windTime;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec2 vWaterXZ;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWaterXZ = (modelMatrix * vec4(position, 1.0)).xz;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying vec2 vWaterXZ;\nuniform float uTime;")
+      .replace(
+        "#include <normal_fragment_maps>",
+        `#include <normal_fragment_maps>
+        vec2 w = vWaterXZ;
+        vec3 ripple = vec3(
+          sin(w.x * 0.9 + uTime * 1.3) + sin(w.y * 1.3 - uTime * 1.1) + sin((w.x + w.y) * 0.55 + uTime * 0.7),
+          0.0,
+          cos(w.y * 1.1 + uTime * 1.2) + cos(w.x * 0.7 - uTime * 0.9) + cos((w.x - w.y) * 0.6 - uTime * 0.8)
+        ) * 0.035;
+        normal = normalize(normal + (viewMatrix * vec4(ripple, 0.0)).xyz);`
+      );
+  };
+  return material;
+}
 
 /** The streamed, procedural world: terrain, vegetation, points of interest and water. */
 export class World {
@@ -14,18 +50,17 @@ export class World {
   private readonly water: Mesh;
   private time = 0;
   private profile: QualityProfile;
+  /** Interactables already used (crystals taken, chests opened); kept by the game across sessions. */
+  readonly taken = new Set<string>();
 
   constructor(private readonly scene: Scene, profile: QualityProfile, seed = DEFAULT_SEED) {
     this.profile = profile;
     this.sampler = new TerrainSampler(seed);
-    this.chunks = new ChunkManager(scene, seed, profile);
+    this.chunks = new ChunkManager(scene, seed, profile, this.taken);
 
     const geometry = new PlaneGeometry(1, 1);
     geometry.rotateX(-Math.PI / 2);
-    this.water = new Mesh(
-      geometry,
-      new MeshPhongMaterial({ color: 0x2f6f7d, specular: 0x9ec7d4, shininess: 90, transparent: true, opacity: 0.74, depthWrite: false })
-    );
+    this.water = new Mesh(geometry, createWaterMaterial());
     this.water.receiveShadow = true;
     this.water.frustumCulled = false;
     this.water.renderOrder = 1;
@@ -76,6 +111,14 @@ export class World {
   /** Biome weights and mountainousness at (x, z), written into `out`. */
   sampleTerrain(x: number, z: number, out: TerrainSample): TerrainSample {
     return this.sampler.sample(x, z, out);
+  }
+
+  nearestInteractable(x: number, y: number, z: number, range: number, out: InteractHit): boolean {
+    return this.chunks.nearestInteractable(x, y, z, range, out);
+  }
+
+  take(hit: InteractHit): void {
+    this.chunks.take(hit);
   }
 
   nearestPoi(x: number, z: number) {
