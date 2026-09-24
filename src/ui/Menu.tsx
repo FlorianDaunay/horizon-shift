@@ -60,7 +60,8 @@ export function Menu() {
             <div className="space-y-5">
               <p className="text-sm leading-relaxed text-text-secondary">
                 Wander through forests, deserts, frozen peaks and swamps that are generated as you walk. Find ruins,
-                towers and caves hidden in the wild. The world is different for every seed.
+                shrines, standing stones and camps, follow the lights at night, and climb the floating stones to the
+                islands in the sky. The world is different for every seed.
               </p>
               {ready ? (
                 <Button variant="primary" className="w-full py-3 text-base" onClick={() => game?.requestPlay()} autoFocus>

@@ -2,6 +2,7 @@ import { CHUNK_SIZE, LOD_RESOLUTIONS } from "../../config";
 import { buildChunkMesh, surfaceHeightFn } from "./chunkMesh";
 import { InstanceCollector, type InstanceBatch } from "./instanceBuffer";
 import { SimplexNoise } from "./noise";
+import { buildIsland, findIsland, type Island } from "./islands";
 import { buildPoi, findPoi, type Poi } from "./poi";
 import { scatterChunk } from "./scatter";
 import { TerrainSampler } from "./TerrainSampler";
@@ -31,7 +32,14 @@ export interface ChunkResult {
   minY: number;
   maxY: number;
   batches: InstanceBatch[];
+  /** Collision circles (see `collision.ts`); x/z are chunk-local, y is world. */
+  colliders: Float32Array;
+  /** Light spots (see `collision.ts`); coordinates are chunk-local. */
+  emitters: Float32Array;
+  /** Highest point of any instance, for the culling volume. */
+  instanceMaxY: number;
   poi: Poi | null;
+  island: Island | null;
 }
 
 const worlds = new Map<number, { sampler: TerrainSampler; colorNoise: SimplexNoise; patchNoise: SimplexNoise }>();
@@ -57,6 +65,8 @@ export function generateChunk(request: ChunkRequest): ChunkResult {
   const instances = new InstanceCollector();
   const poi = scatter > 0 ? findPoi(sampler, cx, cz) : null;
   if (poi) buildPoi(sampler, poi, cx, cz, instances, surface);
+  const island = scatter > 0 ? findIsland(sampler, cx, cz) : null;
+  if (island) buildIsland(sampler, island, cx, cz, instances, surface);
   scatterChunk(sampler, patchNoise, cx, cz, scatter, poi, instances, surface);
 
   return {
@@ -67,16 +77,21 @@ export function generateChunk(request: ChunkRequest): ChunkResult {
     scatter,
     ...mesh,
     batches: instances.finish(),
+    colliders: instances.finishColliders(),
+    emitters: instances.finishEmitters(),
+    instanceMaxY: instances.maxY,
     poi,
+    island,
   };
 }
 
 /** Buffers to hand over (not copy) when posting a result from a worker. */
 export function transferables(result: ChunkResult): ArrayBuffer[] {
-  const buffers: ArrayBuffer[] = [result.positions.buffer, result.normals.buffer, result.colors.buffer] as ArrayBuffer[];
+  const buffers = [result.positions.buffer, result.normals.buffer, result.colors.buffer, result.colliders.buffer, result.emitters.buffer] as ArrayBuffer[];
   for (const batch of result.batches) buffers.push(batch.matrices.buffer as ArrayBuffer, batch.tints.buffer as ArrayBuffer);
   return buffers;
 }
 
-export const chunkKey = (cx: number, cz: number) => `${cx},${cz}`;
+/** Numeric key of a chunk (no string allocation in hot paths). Valid for |coordinate| < 32768. */
+export const chunkKey = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
 export const chunkCenter = (c: number) => (c + 0.5) * CHUNK_SIZE;

@@ -12,7 +12,9 @@ import {
 import { CHUNK_SIZE, LOD_RESOLUTIONS } from "../config";
 import { ObjectPool } from "../core/ObjectPool";
 import { chunkIndices, chunkVertexCount } from "./generation/chunkMesh";
+import { COLLIDER_STRIDE, EMITTER_STRIDE } from "./generation/collision";
 import type { ChunkResult } from "./generation/generateChunk";
+import type { Island } from "./generation/islands";
 import type { Poi } from "./generation/poi";
 import { INSTANCE_CAPACITY, INSTANCE_KINDS, type InstanceKind } from "./instances/kinds";
 import { getModel } from "./instances/models";
@@ -24,12 +26,17 @@ export class ChunkView {
   terrain: Mesh | null = null;
   readonly instanced: InstancedMesh[] = [];
 
+  /** Collision circles and light spots in world coordinates (see `generation/collision.ts`). */
+  colliders: Float32Array = new Float32Array(0);
+  emitters: Float32Array = new Float32Array(0);
+  poi: Poi | null = null;
+  island: Island | null = null;
+
   constructor(
     readonly cx: number,
     readonly cz: number,
     public lod: number,
-    public scatter: number,
-    public poi: Poi | null
+    public scatter: number
   ) {}
 }
 
@@ -89,7 +96,7 @@ export class ChunkViewFactory {
 
   /** Creates the view of a chunk from a worker result. */
   build(result: ChunkResult): ChunkView {
-    const view = new ChunkView(result.cx, result.cz, result.lod, result.scatter, result.poi);
+    const view = new ChunkView(result.cx, result.cz, result.lod, result.scatter);
     this.fill(view, result);
     return view;
   }
@@ -99,7 +106,6 @@ export class ChunkViewFactory {
     this.release(view);
     view.lod = result.lod;
     view.scatter = result.scatter;
-    view.poi = result.poi;
     this.fill(view, result);
   }
 
@@ -113,9 +119,27 @@ export class ChunkViewFactory {
   private fill(view: ChunkView, result: ChunkResult): void {
     const x = result.cx * CHUNK_SIZE;
     const z = result.cz * CHUNK_SIZE;
+    // Culling volumes: the terrain, and (larger: trees, towers and floating islands reach high) its instances.
     const centerY = (result.minY + result.maxY) / 2;
-    // Culling volume shared by the terrain and its instances (trees stick out above the surface).
-    const radius = Math.hypot(CHUNK_SIZE / 2, CHUNK_SIZE / 2, (result.maxY - result.minY) / 2 + 8);
+    const radius = Math.hypot(CHUNK_SIZE / 2, CHUNK_SIZE / 2, (result.maxY - result.minY) / 2 + 2);
+    const top = Math.max(result.maxY + 8, result.instanceMaxY);
+    const instanceCenterY = (result.minY + top) / 2;
+    const instanceRadius = Math.hypot(CHUNK_SIZE / 2, CHUNK_SIZE / 2, (top - result.minY) / 2);
+
+    // Collision and light data arrive chunk-local; keep them in world coordinates.
+    const { colliders, emitters } = result;
+    for (let i = 0; i < colliders.length; i += COLLIDER_STRIDE) {
+      colliders[i] += x;
+      colliders[i + 1] += z;
+    }
+    for (let i = 0; i < emitters.length; i += EMITTER_STRIDE) {
+      emitters[i] += x;
+      emitters[i + 2] += z;
+    }
+    view.colliders = colliders;
+    view.emitters = emitters;
+    view.poi = result.poi;
+    view.island = result.island;
 
     const terrain = this.terrainPools[result.lod].acquire();
     const geometry = terrain.geometry;
@@ -141,8 +165,8 @@ export class ChunkViewFactory {
         attribute.needsUpdate = true;
       }
       mesh.count = batch.count;
-      mesh.boundingSphere!.center.set(CHUNK_SIZE / 2, centerY, CHUNK_SIZE / 2);
-      mesh.boundingSphere!.radius = radius;
+      mesh.boundingSphere!.center.set(CHUNK_SIZE / 2, instanceCenterY, CHUNK_SIZE / 2);
+      mesh.boundingSphere!.radius = instanceRadius;
       mesh.position.set(x, 0, z);
       mesh.updateMatrix();
       this.scene.add(mesh);

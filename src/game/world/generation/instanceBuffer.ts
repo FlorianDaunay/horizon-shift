@@ -1,4 +1,5 @@
 import { INSTANCE_CAPACITY, INSTANCE_KINDS, type InstanceKind } from "../instances/kinds";
+import { COLLISION, EMITTERS } from "./collision";
 
 /** Instance data of one kind for one chunk, ready to upload: 16 floats (matrix) + 3 floats (tint) per instance. */
 export interface InstanceBatch {
@@ -8,11 +9,21 @@ export interface InstanceBatch {
   tints: Float32Array;
 }
 
-/** Collects instances per kind up to each kind's capacity. Positions are chunk-local. */
+/** How far above an instance's origin its geometry can reach (for culling volumes). */
+const HEADROOM = 14;
+
+/**
+ * Collects instances per kind up to each kind's capacity, together with the collision circles and
+ * light spots that go with them. Positions are chunk-local.
+ */
 export class InstanceCollector {
   private readonly matrices = new Map<InstanceKind, Float32Array>();
   private readonly tints = new Map<InstanceKind, Float32Array>();
   private readonly counts = new Map<InstanceKind, number>();
+  private readonly colliders: number[] = [];
+  private readonly emitters: number[] = [];
+  /** Highest point reached by any instance. */
+  maxY = -Infinity;
 
   has(kind: InstanceKind): boolean {
     return (this.counts.get(kind) ?? 0) < INSTANCE_CAPACITY[kind];
@@ -54,6 +65,13 @@ export class InstanceCollector {
     t[count * 3 + 1] = tint[1];
     t[count * 3 + 2] = tint[2];
     this.counts.set(kind, count + 1);
+    this.maxY = Math.max(this.maxY, y + HEADROOM * Math.max(1, sy * 0.5));
+
+    COLLISION[kind]?.(sx, sy, sz, (dx, dz, radius, base, top, standable) => {
+      this.colliders.push(x + c * dx + s * dz, z - s * dx + c * dz, radius, y + base, y + top, standable ? 1 : 0);
+    });
+    const emitter = EMITTERS[kind]?.(sy);
+    if (emitter) this.emitters.push(x + emitter[0], y + emitter[1], z + emitter[2], emitter[3]);
     return true;
   }
 
@@ -70,5 +88,13 @@ export class InstanceCollector {
       });
     }
     return batches;
+  }
+
+  finishColliders(): Float32Array {
+    return new Float32Array(this.colliders);
+  }
+
+  finishEmitters(): Float32Array {
+    return new Float32Array(this.emitters);
   }
 }

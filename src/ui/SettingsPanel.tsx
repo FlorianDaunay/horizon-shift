@@ -22,6 +22,15 @@ export function SettingsPanel() {
         </Field>
       </Section>
 
+      <Section title="Audio">
+        <Field label="Music" hint={`${Math.round(settings.musicVolume * 100)}%`}>
+          <Slider label="Music volume" value={settings.musicVolume} min={0} max={1} step={0.05} onChange={(musicVolume) => update({ musicVolume })} />
+        </Field>
+        <Field label="Sound effects" hint={`${Math.round(settings.sfxVolume * 100)}%`}>
+          <Slider label="Sound effects volume" value={settings.sfxVolume} min={0} max={1} step={0.05} onChange={(sfxVolume) => update({ sfxVolume })} />
+        </Field>
+      </Section>
+
       <Section title="Controls">
         <Field label="Camera sensitivity" hint={`${settings.lookSensitivity.toFixed(2)}×`}>
           <Slider

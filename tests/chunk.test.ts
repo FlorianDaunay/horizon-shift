@@ -3,6 +3,9 @@ import { CHUNK_SIZE, DEFAULT_SEED, LOD_RESOLUTIONS } from "../src/game/config";
 import { chunkIndices, chunkVertexCount, surfaceHeightFn } from "../src/game/world/generation/chunkMesh";
 import { generateChunk } from "../src/game/world/generation/generateChunk";
 import { SCATTER_FULL } from "../src/game/world/generation/scatter";
+import { COLLIDER_STRIDE } from "../src/game/world/generation/collision";
+import { POI_TYPES, findPoi } from "../src/game/world/generation/poi";
+import { TerrainSampler } from "../src/game/world/generation/TerrainSampler";
 import { INSTANCE_CAPACITY } from "../src/game/world/instances/kinds";
 
 describe("chunk indices", () => {
@@ -87,5 +90,75 @@ describe("surfaceHeightFn", () => {
     // Centroids of both triangles of a quad are the mean of their corners.
     expect(surface((1 + 1 / 3) * step, (1 + 1 / 3) * step)).toBeCloseTo((y(1, 1) + y(2, 1) + y(1, 2)) / 3, 4);
     expect(surface((1 + 2 / 3) * step, (1 + 2 / 3) * step)).toBeCloseTo((y(2, 1) + y(1, 2) + y(2, 2)) / 3, 4);
+  });
+});
+
+describe("solid objects", () => {
+  const near = { id: 1, seed: DEFAULT_SEED, lod: 0, scatter: SCATTER_FULL };
+
+  it("gives trees and rocks collision circles that match their instances", () => {
+    for (let cx = -3; cx <= 3; cx++) {
+      for (let cz = -3; cz <= 3; cz++) {
+        const r = generateChunk({ ...near, cx, cz });
+        expect(r.colliders.length % COLLIDER_STRIDE).toBe(0);
+        const solids = r.batches.filter((b) => ["pine", "broadleaf", "deadTree", "cactus", "rock"].includes(b.kind)).reduce((n, b) => n + b.count, 0);
+        expect(r.colliders.length / COLLIDER_STRIDE).toBeGreaterThanOrEqual(solids);
+        for (let i = 0; i < r.colliders.length; i += COLLIDER_STRIDE) {
+          expect(r.colliders[i + 2]).toBeGreaterThan(0);
+          expect(r.colliders[i + 4]).toBeGreaterThan(r.colliders[i + 3]);
+        }
+      }
+    }
+  });
+
+  it("builds every kind of structure somewhere in the world", () => {
+    const sampler = new TerrainSampler(DEFAULT_SEED);
+    const seen = new Set<string>();
+    for (let cx = -40; cx < 40; cx++) for (let cz = -40; cz < 40; cz++) {
+      const poi = findPoi(sampler, cx, cz);
+      if (poi) seen.add(poi.type);
+    }
+    expect([...seen].sort()).toEqual([...POI_TYPES].sort());
+  });
+
+  it("puts light sources on structures", () => {
+    let emitters = 0;
+    for (let cx = -20; cx < 20; cx++) for (let cz = -20; cz < 20; cz++) emitters += generateChunk({ ...near, cx, cz, lod: 2, scatter: 1 }).emitters.length / 4;
+    expect(emitters).toBeGreaterThan(20);
+  });
+});
+
+describe("floating islands", () => {
+  it("come with a stair of stones that can be climbed by jumping", () => {
+    let checked = 0;
+    for (let cx = -30; cx < 30 && checked < 6; cx++) {
+      for (let cz = -30; cz < 30 && checked < 6; cz++) {
+        const r = generateChunk({ id: 1, seed: DEFAULT_SEED, cx, cz, lod: 0, scatter: SCATTER_FULL });
+        if (!r.island) continue;
+        checked++;
+        const stones = r.batches.find((b) => b.kind === "floatStone")!;
+        const list = Array.from({ length: stones.count }, (_, i) => ({ x: stones.matrices[i * 16 + 12], y: stones.matrices[i * 16 + 13], z: stones.matrices[i * 16 + 14] }));
+        for (let i = 1; i < list.length; i++) {
+          const rise = list[i].y - list[i - 1].y;
+          expect(rise).toBeGreaterThan(0);
+          expect(rise).toBeLessThanOrEqual(1.4); // a jump reaches ~1.9 m
+          expect(Math.hypot(list[i].x - list[i - 1].x, list[i].z - list[i - 1].z)).toBeLessThan(3.2);
+        }
+        // The first stone is at ground level (steppable) and the last is within a jump of the island top.
+        expect(list[0].y - r.island.topY).toBeLessThan(0);
+        const last = list[list.length - 1];
+        expect(r.island.topY - last.y).toBeLessThanOrEqual(1.4);
+        const gap = Math.hypot(last.x - (r.island.x - cx * CHUNK_SIZE), last.z - (r.island.z - cz * CHUNK_SIZE)) - r.island.radius * 0.94 - 1.3;
+        expect(gap).toBeLessThan(4.5);
+        // Everything stays inside its chunk.
+        for (const s of list) {
+          expect(s.x).toBeGreaterThan(0);
+          expect(s.x).toBeLessThan(CHUNK_SIZE);
+          expect(s.z).toBeGreaterThan(0);
+          expect(s.z).toBeLessThan(CHUNK_SIZE);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(3);
   });
 });

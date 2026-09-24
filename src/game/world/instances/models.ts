@@ -10,6 +10,7 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   Matrix4,
+  OctahedronGeometry,
   SphereGeometry,
   Uniform,
   type Material,
@@ -19,6 +20,8 @@ import type { InstanceKind } from "./kinds";
 
 /** Shared clock for foliage sway. */
 export const windTime = new Uniform(0);
+/** Brightness of everything that glows: dim by day, strong at night. Driven by the day/night cycle. */
+export const glowLevel = new Uniform(0.4);
 
 export interface InstanceModel {
   geometry: BufferGeometry;
@@ -30,22 +33,37 @@ interface Part {
   geometry: BufferGeometry;
   color: number;
   transform?: Matrix4;
+  /** Multiplies the color: above 1 makes a part glow (used with `glowMaterial`). */
+  emissive?: number;
+  /** Baked ambient occlusion: 1 = none; lower values darken the bottom of the part. */
+  shade?: number;
 }
+
+const linear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 
 /** Bakes a list of colored primitives into one flat-shaded geometry with vertex colors. */
 function assemble(parts: Part[]): BufferGeometry {
-  const geometries = parts.map(({ geometry, color, transform }) => {
+  const geometries = parts.map(({ geometry, color, transform, emissive = 1, shade = 1 }) => {
     const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     if (transform) g.applyMatrix4(transform);
     g.deleteAttribute("uv");
-    const count = g.getAttribute("position").count;
+    const position = g.getAttribute("position");
+    const count = position.count;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < count; i++) {
+      minY = Math.min(minY, position.getY(i));
+      maxY = Math.max(maxY, position.getY(i));
+    }
+    const r = linear(((color >> 16) & 255) / 255) * emissive;
+    const gr = linear(((color >> 8) & 255) / 255) * emissive;
+    const b = linear((color & 255) / 255) * emissive;
     const colors = new Float32Array(count * 3);
-    const r = ((color >> 16) & 255) / 255;
-    const gr = ((color >> 8) & 255) / 255;
-    const b = (color & 255) / 255;
-    // sRGB hex to linear
-    const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-    for (let i = 0; i < count; i++) colors.set([lin(r), lin(gr), lin(b)], i * 3);
+    for (let i = 0; i < count; i++) {
+      const t = maxY > minY ? (position.getY(i) - minY) / (maxY - minY) : 1;
+      const ao = shade + (1 - shade) * t;
+      colors.set([r * ao, gr * ao, b * ao], i * 3);
+    }
     g.setAttribute("color", new BufferAttribute(colors, 3));
     return g;
   });
@@ -56,8 +74,9 @@ function assemble(parts: Part[]): BufferGeometry {
 }
 
 /** Translation, then tilt around X and Z, then scale: a compact way to position a part of a model. */
-function place(x: number, y: number, z: number, rx = 0, rz = 0, sx = 1, sy = 1, sz = 1): Matrix4 {
+function place(x: number, y: number, z: number, rx = 0, rz = 0, sx = 1, sy = 1, sz = 1, ry = 0): Matrix4 {
   const m = new Matrix4().makeTranslation(x, y, z);
+  if (ry) m.multiply(new Matrix4().makeRotationY(ry));
   if (rx) m.multiply(new Matrix4().makeRotationX(rx));
   if (rz) m.multiply(new Matrix4().makeRotationZ(rz));
   if (sx !== 1 || sy !== 1 || sz !== 1) m.multiply(new Matrix4().makeScale(sx, sy, sz));
@@ -80,6 +99,8 @@ function lumpy(geometry: BufferGeometry, amount: number): BufferGeometry {
   geometry.dispose();
   return g;
 }
+
+const flipped = <T extends BufferGeometry>(geometry: T): T => geometry.rotateX(Math.PI);
 
 function grassGeometry(): BufferGeometry {
   const blades = 7;
@@ -129,6 +150,18 @@ function windMaterial(sway: number, options: { doubleSided?: boolean } = {}): Me
   return material;
 }
 
+/** Unlit material for light sources: vertex colors above 1 glow, scaled by the day/night `glowLevel`. */
+function glowMaterial(): MeshBasicMaterial {
+  const material = new MeshBasicMaterial({ vertexColors: true });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlow = glowLevel;
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform float uGlow;")
+      .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.rgb *= uGlow;");
+  };
+  return material;
+}
+
 const solid = () => new MeshLambertMaterial({ vertexColors: true, flatShading: true });
 
 const BARK = 0x5b4131;
@@ -137,20 +170,20 @@ const factories: Record<InstanceKind, () => InstanceModel> = {
     castShadow: true,
     material: windMaterial(0.006),
     geometry: assemble([
-      { geometry: new CylinderGeometry(0.22, 0.34, 2.2, 6), color: BARK, transform: place(0, 1.1, 0) },
-      { geometry: new ConeGeometry(1.7, 2.6, 7), color: 0x2f5d3a, transform: place(0, 2.6, 0) },
-      { geometry: new ConeGeometry(1.35, 2.4, 7), color: 0x37693f, transform: place(0, 4.1, 0) },
-      { geometry: new ConeGeometry(0.95, 2.2, 7), color: 0x3f7745, transform: place(0, 5.5, 0) },
+      { geometry: new CylinderGeometry(0.22, 0.34, 2.2, 6), color: BARK, transform: place(0, 1.1, 0), shade: 0.7 },
+      { geometry: new ConeGeometry(1.7, 2.6, 7), color: 0x2f5d3a, transform: place(0, 2.6, 0), shade: 0.5 },
+      { geometry: new ConeGeometry(1.35, 2.4, 7), color: 0x37693f, transform: place(0, 4.1, 0), shade: 0.55 },
+      { geometry: new ConeGeometry(0.95, 2.2, 7), color: 0x3f7745, transform: place(0, 5.5, 0), shade: 0.6 },
     ]),
   }),
   broadleaf: () => ({
     castShadow: true,
     material: windMaterial(0.005),
     geometry: assemble([
-      { geometry: new CylinderGeometry(0.25, 0.4, 2.6, 6), color: BARK, transform: place(0, 1.3, 0) },
-      { geometry: new IcosahedronGeometry(1.9, 1), color: 0x4d8a37, transform: place(0, 3.7, 0, 0, 0, 1, 0.9, 1) },
-      { geometry: new IcosahedronGeometry(1.3, 1), color: 0x5a9a3f, transform: place(0.9, 4.7, 0.4) },
-      { geometry: new IcosahedronGeometry(1.1, 1), color: 0x43792f, transform: place(-0.9, 4.3, -0.6) },
+      { geometry: new CylinderGeometry(0.25, 0.4, 2.6, 6), color: BARK, transform: place(0, 1.3, 0), shade: 0.7 },
+      { geometry: new IcosahedronGeometry(1.9, 1), color: 0x4d8a37, transform: place(0, 3.7, 0, 0, 0, 1, 0.9, 1), shade: 0.5 },
+      { geometry: new IcosahedronGeometry(1.3, 1), color: 0x5a9a3f, transform: place(0.9, 4.7, 0.4), shade: 0.6 },
+      { geometry: new IcosahedronGeometry(1.1, 1), color: 0x43792f, transform: place(-0.9, 4.3, -0.6), shade: 0.6 },
     ]),
   }),
   deadTree: () => ({
@@ -166,7 +199,7 @@ const factories: Record<InstanceKind, () => InstanceModel> = {
     castShadow: true,
     material: solid(),
     geometry: assemble([
-      { geometry: new CylinderGeometry(0.32, 0.36, 3, 8), color: 0x4f8a4a, transform: place(0, 1.5, 0) },
+      { geometry: new CylinderGeometry(0.32, 0.36, 3, 8), color: 0x4f8a4a, transform: place(0, 1.5, 0), shade: 0.7 },
       { geometry: new SphereGeometry(0.32, 8, 5), color: 0x4f8a4a, transform: place(0, 3, 0) },
       { geometry: new CylinderGeometry(0.17, 0.19, 1.1, 6), color: 0x4f8a4a, transform: place(0.65, 1.8, 0, 0, 0) },
       { geometry: new CylinderGeometry(0.17, 0.17, 0.75, 6), color: 0x4f8a4a, transform: place(0.45, 1.25, 0, 0, Math.PI / 2) },
@@ -177,26 +210,35 @@ const factories: Record<InstanceKind, () => InstanceModel> = {
   rock: () => ({
     castShadow: true,
     material: solid(),
-    geometry: assemble([{ geometry: lumpy(new IcosahedronGeometry(1, 1), 0.55), color: 0x8a847d, transform: place(0, 0.55, 0, 0, 0, 1, 0.75, 1) }]),
+    geometry: assemble([{ geometry: lumpy(new IcosahedronGeometry(1, 1), 0.55), color: 0x8a847d, transform: place(0, 0.55, 0, 0, 0, 1, 0.75, 1), shade: 0.65 }]),
   }),
   grass: () => ({ castShadow: false, material: windMaterial(0.5, { doubleSided: true }), geometry: grassGeometry() }),
+  glowShroom: () => ({
+    castShadow: false,
+    material: glowMaterial(),
+    geometry: assemble([
+      { geometry: new CylinderGeometry(0.04, 0.06, 0.26, 5), color: 0x8d8a7a, transform: place(0, 0.13, 0), emissive: 0.5 },
+      { geometry: new SphereGeometry(0.17, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), color: 0x5cf0d0, transform: place(0, 0.26, 0, 0, 0, 1, 0.7, 1), emissive: 2.4 },
+      { geometry: new SphereGeometry(0.1, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2), color: 0xb98cff, transform: place(0.16, 0.12, 0.05, 0, 0, 1, 0.7, 1), emissive: 2.4 },
+    ]),
+  }),
   ruinBlock: () => ({
     castShadow: true,
     material: solid(),
-    geometry: assemble([{ geometry: new BoxGeometry(1, 1, 1), color: 0x9a948a, transform: place(0, 0.5, 0) }]),
+    geometry: assemble([{ geometry: new BoxGeometry(1, 1, 1), color: 0x9a948a, transform: place(0, 0.5, 0), shade: 0.75 }]),
   }),
   ruinPillar: () => ({
     castShadow: true,
     material: solid(),
     geometry: assemble([
-      { geometry: new CylinderGeometry(0.5, 0.55, 1, 8), color: 0xa6a094, transform: place(0, 0.5, 0) },
+      { geometry: new CylinderGeometry(0.5, 0.55, 1, 8), color: 0xa6a094, transform: place(0, 0.5, 0), shade: 0.75 },
       { geometry: new BoxGeometry(1.5, 0.08, 1.5), color: 0x8f897e, transform: place(0, 1.02, 0) },
     ]),
   }),
   towerBody: () => ({
     castShadow: true,
     material: solid(),
-    geometry: assemble([{ geometry: new CylinderGeometry(0.85, 1, 1, 10), color: 0x9d968b, transform: place(0, 0.5, 0) }]),
+    geometry: assemble([{ geometry: new CylinderGeometry(0.85, 1, 1, 10), color: 0x9d968b, transform: place(0, 0.5, 0), shade: 0.8 }]),
   }),
   towerRoof: () => ({
     castShadow: true,
@@ -207,6 +249,88 @@ const factories: Record<InstanceKind, () => InstanceModel> = {
     castShadow: false,
     material: new MeshBasicMaterial({ color: 0x030304 }),
     geometry: assemble([{ geometry: new SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), color: 0x030304, transform: place(0, 0, 0.2) }]),
+  }),
+  menhir: () => ({
+    castShadow: true,
+    material: solid(),
+    geometry: assemble([
+      { geometry: lumpy(new CylinderGeometry(0.42, 0.66, 1, 5, 3), 0.18), color: 0x8f929c, transform: place(0, 0.5, 0), shade: 0.7 },
+      { geometry: new ConeGeometry(0.42, 0.12, 5), color: 0x7d808a, transform: place(0, 1.05, 0) },
+    ]),
+  }),
+  obelisk: () => ({
+    castShadow: true,
+    material: solid(),
+    geometry: assemble([
+      { geometry: new CylinderGeometry(0.42, 0.72, 1, 4), color: 0x3b3e4c, transform: place(0, 0.5, 0, 0, 0, 1, 1, 1, Math.PI / 4), shade: 0.75 },
+      { geometry: new ConeGeometry(0.42, 0.06, 4), color: 0x50546a, transform: place(0, 1.03, 0, 0, 0, 1, 1, 1, Math.PI / 4) },
+    ]),
+  }),
+  tent: () => ({
+    castShadow: true,
+    material: solid(),
+    geometry: assemble([
+      { geometry: new ConeGeometry(1.6, 1.7, 4), color: 0xd9be8a, transform: place(0, 0.85, 0, 0, 0, 1, 1, 1, Math.PI / 4), shade: 0.8 },
+      { geometry: new BoxGeometry(0.5, 0.9, 0.06), color: 0x2d2118, transform: place(0, 0.45, 1.12, 0.1) },
+      { geometry: new CylinderGeometry(0.03, 0.03, 2.0, 4), color: BARK, transform: place(0, 0.95, 0) },
+    ]),
+  }),
+  campfire: () => ({
+    castShadow: false,
+    material: glowMaterial(),
+    geometry: assemble([
+      { geometry: new CylinderGeometry(0.08, 0.08, 0.9, 5), color: 0x2a1c12, transform: place(0, 0.1, 0, 0, Math.PI / 2, 1, 1, 1, 0), emissive: 0.6 },
+      { geometry: new CylinderGeometry(0.08, 0.08, 0.9, 5), color: 0x2a1c12, transform: place(0, 0.14, 0, 0, Math.PI / 2, 1, 1, 1, 1.05), emissive: 0.6 },
+      { geometry: new CylinderGeometry(0.08, 0.08, 0.9, 5), color: 0x2a1c12, transform: place(0, 0.18, 0, 0, Math.PI / 2, 1, 1, 1, 2.1), emissive: 0.6 },
+      { geometry: new ConeGeometry(0.32, 0.9, 7), color: 0xff7a24, transform: place(0, 0.6, 0), emissive: 3 },
+      { geometry: new ConeGeometry(0.17, 0.62, 6), color: 0xffd27a, transform: place(0.03, 0.5, 0), emissive: 4 },
+    ]),
+  }),
+  torch: () => ({
+    castShadow: false,
+    material: glowMaterial(),
+    geometry: assemble([
+      { geometry: new CylinderGeometry(0.04, 0.06, 1.4, 5), color: 0x3a2a1c, transform: place(0, 0.7, 0), emissive: 0.6 },
+      { geometry: new ConeGeometry(0.14, 0.46, 6), color: 0xff8a2a, transform: place(0, 1.65, 0), emissive: 3 },
+      { geometry: new ConeGeometry(0.08, 0.3, 5), color: 0xffd98a, transform: place(0, 1.6, 0), emissive: 4 },
+    ]),
+  }),
+  lantern: () => ({
+    castShadow: false,
+    material: glowMaterial(),
+    geometry: assemble([
+      { geometry: new CylinderGeometry(0.05, 0.07, 2, 5), color: 0x2b2b30, transform: place(0, 1, 0), emissive: 0.8 },
+      { geometry: new CylinderGeometry(0.17, 0.17, 0.36, 6), color: 0xffc46a, transform: place(0, 2.1, 0), emissive: 3.4 },
+      { geometry: new ConeGeometry(0.26, 0.2, 6), color: 0x2b2b30, transform: place(0, 2.38, 0), emissive: 0.8 },
+    ]),
+  }),
+  crystal: () => ({
+    castShadow: false,
+    material: glowMaterial(),
+    geometry: assemble([
+      { geometry: new OctahedronGeometry(0.5, 0), color: 0x59e8ff, transform: place(0, 0.9, 0, 0, 0, 1, 1.8, 1), emissive: 2.4 },
+      { geometry: new OctahedronGeometry(0.3, 0), color: 0xa98bff, transform: place(0.4, 0.4, 0.1, 0, 0.4, 1, 1.7, 1), emissive: 2.4 },
+      { geometry: new OctahedronGeometry(0.25, 0), color: 0x7dffe0, transform: place(-0.35, 0.3, -0.1, 0, -0.5, 1, 1.6, 1), emissive: 2.4 },
+    ]),
+  }),
+  floatStone: () => ({
+    castShadow: true,
+    material: solid(),
+    geometry: assemble([
+      { geometry: lumpy(new CylinderGeometry(1, 0.85, 0.45, 7), 0.12), color: 0x8f8c86, transform: place(0, -0.225, 0), shade: 0.8 },
+      { geometry: lumpy(flipped(new ConeGeometry(0.8, 0.7, 7)), 0.25), color: 0x6b6a67, transform: place(0, -0.8, 0) },
+      { geometry: new CylinderGeometry(0.96, 0.96, 0.04, 7), color: 0xb7cdbb, transform: place(0, -0.02, 0) },
+    ]),
+  }),
+  islandBase: () => ({
+    castShadow: true,
+    material: solid(),
+    geometry: assemble([
+      { geometry: lumpy(new CylinderGeometry(1, 0.98, 0.35, 22, 1), 0.06), color: 0x5a9a3f, transform: place(0, -0.175, 0) },
+      { geometry: lumpy(flipped(new ConeGeometry(0.98, 1.5, 14, 3)), 0.32), color: 0x7a6e60, transform: place(0, -1.1, 0), shade: 0.55 },
+      { geometry: flipped(new ConeGeometry(0.16, 0.8, 6)), color: 0x655b50, transform: place(0.38, -1.5, 0.2) },
+      { geometry: flipped(new ConeGeometry(0.13, 0.6, 6)), color: 0x655b50, transform: place(-0.4, -1.2, -0.3) },
+    ]),
   }),
 };
 

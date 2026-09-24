@@ -82,6 +82,12 @@ export function scatterChunk(
         out.add("cactus", x, y0 - 0.2, z, rollYaw * 6.28, size * 0.9, size * (0.8 + rollKind * 0.7), size * 0.9, jitterTint(rng, 0.9, 1, 0.85));
         continue;
       }
+      const shroomChance = w[3] * 0.09 + w[0] * 0.012;
+      if (slope < 0.8 && roll > 0.9 && rollKind < shroomChance * 6) {
+        const m = 0.7 + rollSize * 0.9;
+        out.add("glowShroom", x, y0 - 0.02, z, rollYaw * 6.28, m, m, m, [1, 1, 1]);
+        continue;
+      }
       const rockChance = 0.05 + w[1] * 0.08 + w[2] * 0.12 + sample.mountain * 0.12;
       if (slope < 1.6 && rollKind < rockChance && roll > 0.4) {
         const s = 0.5 + rollSize * 1.6;

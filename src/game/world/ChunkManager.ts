@@ -1,6 +1,7 @@
-import type { Scene } from "three";
+import type { Scene, Vector3 } from "three";
 import { CHUNK_SIZE } from "../config";
 import { ChunkView, ChunkViewFactory } from "./ChunkView";
+import { COLLIDER_STRIDE, EMITTER_STRIDE } from "./generation/collision";
 import { chunkKey, type ChunkRequest, type ChunkResult } from "./generation/generateChunk";
 import { SCATTER_FULL } from "./generation/scatter";
 import TerrainWorker from "./workers/terrain.worker?worker";
@@ -23,6 +24,8 @@ export interface StreamingStats {
 const LOD_RINGS = [2.5, 4.5];
 /** Extra distance a chunk must cross before its detail level changes, so borders do not flicker. */
 const HYSTERESIS = 0.75;
+/** How far above the feet a surface can be and still be stepped or landed on (meters). */
+const REACH = 0.55;
 /** Chunks beyond `viewRadius + UNLOAD_MARGIN` are unloaded. */
 const UNLOAD_MARGIN = 1.5;
 
@@ -55,8 +58,8 @@ function stableBand(distance: number, thresholds: readonly number[], current: nu
  * it nearest-first, and shows results within a per-frame time budget so streaming never stalls a frame.
  */
 export class ChunkManager {
-  private readonly views = new Map<string, ChunkView>();
-  private readonly inFlight = new Map<string, number>();
+  private readonly views = new Map<number, ChunkView>();
+  private readonly inFlight = new Map<number, number>();
   private readonly ready: ChunkResult[] = [];
   private readonly factory: ChunkViewFactory;
   private readonly workers: WorkerPool;
@@ -182,13 +185,107 @@ export class ChunkManager {
     }
   }
 
-  /** The point of interest closest to (x, z) among loaded chunks, if any. */
+  /**
+   * Highest standable surface under (x, z) that the player can step or land on from `feetY`
+   * (the top must be no more than REACH above the feet), or -Infinity.
+   */
+  supportAt(x: number, z: number, feetY: number): number {
+    let best = -Infinity;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const c = this.views.get(chunkKey(cx + dx, cz + dz))?.colliders;
+        if (!c) continue;
+        for (let i = 0; i < c.length; i += COLLIDER_STRIDE) {
+          if (c[i + 5] === 0) continue;
+          const top = c[i + 4];
+          if (top <= best || top > feetY + REACH || feetY < c[i + 3]) continue;
+          const ex = x - c[i];
+          const ez = z - c[i + 1];
+          if (ex * ex + ez * ez < c[i + 2] * c[i + 2]) best = top;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Pushes a body (a vertical cylinder at `position` with the given radius) out of every solid it overlaps. */
+  resolve(position: Vector3, radius: number, height: number): void {
+    const cx = Math.floor(position.x / CHUNK_SIZE);
+    const cz = Math.floor(position.z / CHUNK_SIZE);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const c = this.views.get(chunkKey(cx + dx, cz + dz))?.colliders;
+          if (!c) continue;
+          for (let i = 0; i < c.length; i += COLLIDER_STRIDE) {
+            // Only what is at body height, and not what can be stepped onto.
+            if (position.y + height <= c[i + 3] || position.y >= c[i + 4] - REACH) continue;
+            const ex = position.x - c[i];
+            const ez = position.z - c[i + 1];
+            const reach = c[i + 2] + radius;
+            const d2 = ex * ex + ez * ez;
+            if (d2 >= reach * reach) continue;
+            const d = Math.sqrt(d2);
+            const nx = d > 1e-4 ? ex / d : 1;
+            const nz = d > 1e-4 ? ez / d : 0;
+            position.x = c[i] + nx * reach;
+            position.z = c[i + 1] + nz * reach;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Fills `out` (5 floats per slot: x, y, z, type, squared distance) with the nearest light spots
+   * within `range` of the point, nearest first. Returns how many were found.
+   */
+  nearestEmitters(x: number, y: number, z: number, range: number, out: Float32Array): number {
+    const slots = out.length / 5;
+    let found = 0;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const limit = range * range;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const e = this.views.get(chunkKey(cx + dx, cz + dz))?.emitters;
+        if (!e) continue;
+        for (let i = 0; i < e.length; i += EMITTER_STRIDE) {
+          const d2 = (e[i] - x) ** 2 + (e[i + 1] - y) ** 2 + (e[i + 2] - z) ** 2;
+          if (d2 > limit) continue;
+          let slot = found < slots ? found : slots - 1;
+          if (found >= slots && d2 >= out[slot * 5 + 4]) continue;
+          while (slot > 0 && out[(slot - 1) * 5 + 4] > d2) {
+            out.copyWithin(slot * 5, (slot - 1) * 5, slot * 5);
+            slot--;
+          }
+          out[slot * 5] = e[i];
+          out[slot * 5 + 1] = e[i + 1];
+          out[slot * 5 + 2] = e[i + 2];
+          out[slot * 5 + 3] = e[i + 3];
+          out[slot * 5 + 4] = d2;
+          if (found < slots) found++;
+        }
+      }
+    }
+    return found;
+  }
+
+  /** The landmark (structure or floating island) closest to (x, z) among loaded chunks, if any. */
   nearestPoi(x: number, z: number) {
     let best: { type: string; x: number; z: number; distance: number } | null = null;
     for (const view of this.views.values()) {
-      if (!view.poi) continue;
-      const distance = Math.hypot(view.poi.x - x, view.poi.z - z);
-      if (!best || distance < best.distance) best = { type: view.poi.type, x: view.poi.x, z: view.poi.z, distance };
+      const landmarks = [
+        view.poi && { type: view.poi.type as string, x: view.poi.x, z: view.poi.z },
+        view.island && { type: "island", x: view.island.x, z: view.island.z },
+      ];
+      for (const landmark of landmarks) {
+        if (!landmark) continue;
+        const distance = Math.hypot(landmark.x - x, landmark.z - z);
+        if (!best || distance < best.distance) best = { ...landmark, distance };
+      }
     }
     return best;
   }

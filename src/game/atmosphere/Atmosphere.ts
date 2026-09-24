@@ -69,6 +69,11 @@ export class Atmosphere {
     this.sun.shadow.normalBias = 0.35;
   }
 
+  /** Jumps to a time of day (hours since midnight). */
+  setHour(hour: number): void {
+    this.hour = ((hour % 24) + 24) % 24;
+  }
+
   /** 0 = deep night, 1 = full day. */
   get daylight(): number {
     return smooth(-0.1, 0.3, this.sunDir.y);

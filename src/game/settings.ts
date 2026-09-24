@@ -13,6 +13,10 @@ export interface GameSettings {
   fov: number;
   /** Real minutes for a full day; 0 freezes the time of day. */
   dayLengthMinutes: number;
+  /** 0..1 */
+  musicVolume: number;
+  /** 0..1: footsteps and other effects. */
+  sfxVolume: number;
   showDebug: boolean;
   seed: number;
 }
@@ -23,6 +27,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   invertY: false,
   fov: 70,
   dayLengthMinutes: 12,
+  musicVolume: 0.45,
+  sfxVolume: 0.6,
   showDebug: false,
   seed: DEFAULT_SEED,
 };

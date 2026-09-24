@@ -1,10 +1,11 @@
-import { Mesh, MeshPhongMaterial, PlaneGeometry, type Scene, type Vector3 } from "three";
+import { MathUtils, Mesh, MeshPhongMaterial, PlaneGeometry, type Scene, type Vector3 } from "three";
 import { CHUNK_SIZE, DEFAULT_SEED, WATER_LEVEL } from "../config";
 import type { QualityProfile } from "../performance/quality";
 import { ChunkManager } from "./ChunkManager";
 import type { BiomeId } from "./generation/biomes";
-import { TerrainSampler } from "./generation/TerrainSampler";
-import { windTime } from "./instances/models";
+import { TerrainSampler, type TerrainSample } from "./generation/TerrainSampler";
+import { glowLevel, windTime } from "./instances/models";
+import { surfaceAt, type Surface } from "./generation/surface";
 
 /** The streamed, procedural world: terrain, vegetation, points of interest and water. */
 export class World {
@@ -54,6 +55,29 @@ export class World {
     return this.sampler.biomeAt(x, z);
   }
 
+  /** Standable object surface under (x, z) reachable from `feetY` (see `ChunkManager.supportAt`). */
+  supportAt(x: number, z: number, feetY: number): number {
+    return this.chunks.supportAt(x, z, feetY);
+  }
+
+  resolveObstacles(position: Vector3, radius: number, height: number): void {
+    this.chunks.resolve(position, radius, height);
+  }
+
+  nearestEmitters(x: number, y: number, z: number, range: number, out: Float32Array): number {
+    return this.chunks.nearestEmitters(x, y, z, range, out);
+  }
+
+  /** What the ground is made of at (x, z). */
+  surfaceAt(x: number, z: number): Surface {
+    return surfaceAt(this.sampler, x, z);
+  }
+
+  /** Biome weights and mountainousness at (x, z), written into `out`. */
+  sampleTerrain(x: number, z: number, out: TerrainSample): TerrainSample {
+    return this.sampler.sample(x, z, out);
+  }
+
   nearestPoi(x: number, z: number) {
     return this.chunks.nearestPoi(x, z);
   }
@@ -74,9 +98,11 @@ export class World {
     this.resizeWater();
   }
 
-  update(dt: number, focus: Vector3): void {
+  /** `daylight` (0 night .. 1 day) drives how brightly lamps, crystals and mushrooms glow. */
+  update(dt: number, focus: Vector3, daylight: number): void {
     this.time += dt;
     windTime.value = this.time;
+    glowLevel.value = MathUtils.lerp(1.5, 0.3, daylight);
     // Loading is prioritised until the surroundings exist, then throttled to protect frame time.
     this.chunks.update(focus.x, focus.z, this.isReady() ? 2.5 : 8);
     this.water.position.x = focus.x;

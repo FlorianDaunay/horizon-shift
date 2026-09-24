@@ -4,7 +4,9 @@ A procedural 3D nature exploration game that runs entirely in your browser. No b
 the build is a static site hosted on GitHub Pages.
 
 Walk (third person) through forests, deserts, frozen peaks and swamps that are generated around you as you
-move, find ruins, stone towers and caves, and watch the sun cross the sky.
+move. Find ruins, shrines, standing stones, camps and caves, follow the lights at night, and climb a spiral of
+floating stones to the islands drifting in the sky. Everything, including the lo-fi music and the footsteps, is
+generated in the browser.
 
 ## Controls
 
@@ -17,6 +19,7 @@ move, find ruins, stone towers and caves, and watch the sun cross the sky.
 | `Space`                    | Jump                                                |
 | Mouse wheel, `-` / `+`     | Zoom the camera                                     |
 | `R`                        | Put the camera back behind you                      |
+| `M`                        | Mute or unmute music and sounds                     |
 | `Esc`                      | Release the mouse and open the menu                 |
 
 ## Development
@@ -73,7 +76,8 @@ src/
     input/       device-independent actions, input sources (keyboard + mouse today)
     player/      character physics, avatar, third-person camera
     world/       chunk streaming, workers, procedural generation, instanced models
-    atmosphere/  sky shader, day/night cycle, sun, fog
+    atmosphere/  sky shader, day/night cycle, sun, fog, light pool, fireflies
+    audio/       synthesised music, wind and footsteps (Web Audio)
     rendering/   post-processing
     performance/ FPS monitor, adaptive quality, quality profiles
   ui/          React interface: menu, HUD, settings

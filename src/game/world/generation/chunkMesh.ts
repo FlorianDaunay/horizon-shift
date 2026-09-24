@@ -8,6 +8,8 @@ export const chunkVertexCount = (res: number) => (res + 1) * (res + 1) + 4 * (re
 
 /** Step used to measure slopes, identical for every LOD so normals match across chunk borders. */
 const NORMAL_EPS = 1.25;
+/** Distance at which the terrain around a vertex is compared to it for ambient occlusion. */
+const AO_RADIUS = 4;
 
 export interface ChunkMeshBuffers {
   positions: Float32Array;
@@ -66,6 +68,14 @@ export function buildChunkMesh(
       normals[v * 3 + 1] = ny;
       normals[v * 3 + 2] = nz;
       terrainColor(sample.weights, y, 1 - ny, colorNoise.fbm(wx * 0.05, wz * 0.05, 2), colors, v * 3);
+
+      // Baked ambient occlusion: hollows are darker, crests a touch brighter. Free at runtime.
+      const around =
+        (sampler.heightAt(wx - AO_RADIUS, wz) + sampler.heightAt(wx + AO_RADIUS, wz) + sampler.heightAt(wx, wz - AO_RADIUS) + sampler.heightAt(wx, wz + AO_RADIUS)) / 4;
+      const ao = Math.min(1.06, Math.max(0.68, 1 - (around - y) * 0.055));
+      colors[v * 3] *= ao;
+      colors[v * 3 + 1] *= ao;
+      colors[v * 3 + 2] *= ao;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }

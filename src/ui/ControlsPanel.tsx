@@ -6,9 +6,10 @@ const ROWS: { keys: ReactNode; action: string }[] = [
   { keys: <span className="text-xs text-text-secondary">Mouse</span>, action: "Turn the camera around your character" },
   { keys: <><Kbd>←</Kbd><Kbd>↑</Kbd><Kbd>↓</Kbd><Kbd>→</Kbd></>, action: "Turn the camera with the keyboard" },
   { keys: <Kbd>Shift</Kbd>, action: "Sprint" },
-  { keys: <Kbd>Space</Kbd>, action: "Jump" },
+  { keys: <Kbd>Space</Kbd>, action: "Jump (a sprint jump keeps its speed in the air)" },
   { keys: <span className="text-xs text-text-secondary">Wheel</span>, action: "Zoom the camera (also − and +)" },
   { keys: <Kbd>R</Kbd>, action: "Put the camera back behind you" },
+  { keys: <Kbd>M</Kbd>, action: "Mute or unmute music and sounds" },
   { keys: <Kbd>Esc</Kbd>, action: "Pause and open the menu" },
 ];
 

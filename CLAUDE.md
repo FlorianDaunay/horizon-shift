@@ -34,6 +34,8 @@ Before finishing a change, run lint, typecheck, tests and build: CI runs exactly
 - `src/themes/` is a token-based theme system supplied by the project owner (auto-registers every file in
   `themes/definitions`). UI must use its Tailwind classes (`bg-surface`, `text-text-muted`, `rounded-card`,
   ...) instead of hard-coded colors so every theme works.
+- Solid objects: `generation/collision.ts` declares collision cylinders and light spots per instance kind; the
+  player only talks to the `Walkable` interface. Sound is synthesised in `game/audio` (no asset files).
 - Quality levels live in `game/performance/quality.ts`; `AdaptiveQuality` picks one from the frame rate.
 
 ## Conventions

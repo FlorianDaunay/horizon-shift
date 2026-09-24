@@ -36,11 +36,14 @@ it (today: `pointerLock.locked`).
 
 ## Player (`src/game/player`)
 
-- `PlayerController`: walking physics on the terrain (camera-relative movement, gravity, jump, steep-slope and
-  deep-water blocking, wading). Depends only on a `Ground` (`heightAt`) and an `InputFrame`.
+- `PlayerController`: walking physics (camera-relative movement, gravity, jump, steep-slope and deep-water
+  blocking, wading, sprint kept in the air). It depends only on a `Walkable` (terrain height, object surfaces to
+  stand on, obstacle push-out) and an `InputFrame`, and runs in sub-steps of at most 1/60 s. It reports
+  `events` (step, jump, landing) that the sound layer listens to.
 - `ThirdPersonCamera`: orbit-follow camera. The boom shortens when terrain gets between the camera and the
   player and the camera never goes underground.
-- `PlayerAvatar`: procedural low-poly character animated from controller state.
+- `PlayerAvatar`: the hooded wanderer (lathe cloak, scarf chain, staff with a lantern and a real light),
+  animated from controller state.
 
 ## World (`src/game/world`)
 
@@ -61,13 +64,26 @@ The world is a pure function of a seed.
   `InstancedMesh`es (one pool per kind) from worker results, so streaming does not allocate GPU objects.
   Culling volumes are set by hand (an `InstancedMesh` would otherwise scan every instance).
 - `instances/kinds.ts` lists everything drawn as instances and its per-chunk capacity; `instances/models.ts`
-  builds the geometry and materials (with wind sway injected into the vertex shader).
+  builds the geometry and materials: wind sway injected into the vertex shader, baked ambient occlusion, and a
+  `glowMaterial` (parts with vertex colors above 1 shine, scaled by a day/night uniform).
+- **Collision** (`generation/collision.ts`): every solid kind declares vertical cylinders (radius, base, top,
+  standable) and every light kind a light spot. `InstanceCollector.add` records them next to the instance, so
+  they always match what is drawn. `ChunkManager` answers `supportAt` (what can I stand on here?),
+  `resolve` (push me out of solids) and `nearestEmitters` from the loaded chunks, with no allocation.
+- **Structures** (`generation/poi.ts`): eight builders (ruins, tower, cave, circle, obelisk, camp, shrine, arch)
+  picked by biome weights. **Floating islands** (`generation/islands.ts`) hover 24-36 m above the ground and come
+  with a spiral of `floatStone`s (rise of at most 1.3 m per stone, so each needs a jump but none is out of
+  reach); a test checks that every generated stair is climbable.
 
 **Adding a biome**: add its id and label in `generation/biomes.ts`; give it an affinity, a height profile
 (`TerrainSampler.sample`), a ground color (`terrainColor.ts`) and vegetation rules (`scatter.ts`).
 
 **Adding vegetation or a POI piece**: add the id and capacity to `instances/kinds.ts`, a model to
-`instances/models.ts`, and emit it from `scatter.ts` or `poi.ts`.
+`instances/models.ts`, optionally a collision shape or a light in `generation/collision.ts`, and emit it from
+`scatter.ts`, `poi.ts` or `islands.ts`.
+
+**Adding a structure**: add its name to `POI_TYPES`, its per-biome odds to `TABLE`, its radius to `RADIUS` and a
+builder to `BUILDERS` in `poi.ts`.
 
 ## Atmosphere and rendering
 
@@ -75,6 +91,11 @@ The world is a pure function of a seed.
   color always matches the horizon (this is what hides chunk pop-in), and a shadow frustum that follows the
   player, snapped to shadow-map texels.
 - `sky.ts`: gradient dome shader with sun, moon and stars, pinned to the far plane.
+- `LightPool`: hundreds of torches, lanterns and crystals exist, but only a fixed handful of real point lights
+  (constant shader cost) hop between the nearest ones, fading and flickering. The rest of the glow is unlit
+  emissive geometry.
+- `Fireflies`: one `Points` draw whose positions are computed entirely in the vertex shader (wrapping around the
+  player); its intensity follows the night and the biome.
 - `PostProcessing`: multisampled HDR render target → color grade + vignette shader → tone mapping and sRGB
   output. Disabled on the lowest quality levels.
 
@@ -86,6 +107,15 @@ The world is a pure function of a seed.
 - `quality.ts` defines what each level means (view radius, vegetation and grass radius, shadow map size, render
   scale, post-processing). Adding a level is adding a row.
 
+## Audio (`src/game/audio`)
+
+Everything is synthesised with Web Audio, so there are no files to download. `AudioEngine` owns the context (it
+can only start on a user gesture, so `Game.requestPlay` starts it), the buses and a soft limiter, and muffles the
+mix while the menu is open. `LofiMusic` schedules chords, a soft electric piano, bass, dusty drums and vinyl
+crackle a moment ahead and gets darker at night; `Ambience` is wind that follows altitude and biome; `Sfx` makes
+footsteps from filtered noise per `Surface` (`generation/surface.ts`). `Game.playSounds` maps the player's
+step/jump/landing events to sounds.
+
 ## UI and themes
 
 `src/themes` is a token-based theme system. Every theme is one file in `src/themes/definitions` (auto
@@ -96,7 +126,9 @@ Player options live in a persisted zustand store (`ui/stores.ts`) and are forwar
 
 ## Known limitations
 
-- The player collides with the terrain and water only; trees, rocks and POIs are not solid yet.
+- Collision is made of vertical cylinders: a good fit for trunks, rocks and pillars, an approximation for long
+  walls (a row of circles) and none for the cave interior or the inside of buildings.
+- Point lights are limited to three (two pooled + the player's lantern) to keep lighting cost constant.
 - Worker result buffers are allocated per chunk and copied into pooled GPU buffers; recycling them back to
   the workers would remove the remaining allocation.
 - Vegetation instances are per chunk (one `InstancedMesh` per kind and chunk), not global. This keeps

@@ -3,7 +3,17 @@ import { BIOME_LABELS, type GameStats } from "../game";
 import { Kbd } from "./kit";
 import { useSettings } from "./stores";
 
-const POI_LABELS: Record<string, string> = { ruins: "Ruins", tower: "Stone tower", cave: "Cave" };
+const POI_LABELS: Record<string, string> = {
+  ruins: "Ruins",
+  tower: "Stone tower",
+  cave: "Cave",
+  circle: "Standing stones",
+  obelisk: "Obelisk",
+  camp: "Campsite",
+  shrine: "Shrine",
+  arch: "Ancient arch",
+  island: "Floating island",
+};
 
 const formatHour = (hour: number) => {
   const h = Math.floor(hour);
@@ -51,6 +61,7 @@ export function Hud({ stats }: { stats: GameStats }) {
         <Chip>
           <span className="font-mono">{Math.round(stats.fps)}</span> <span className="text-text-muted">fps</span>
           {stats.autoQuality && <span className="ml-2 text-xs text-text-muted">auto · {stats.quality}</span>}
+          {stats.muted && <span className="ml-2 text-xs text-warning">muted</span>}
         </Chip>
         {showDebug && (
           <div
@@ -83,6 +94,8 @@ export function Hud({ stats }: { stats: GameStats }) {
             <Kbd>Shift</Kbd> sprint
             <span className="text-text-muted">·</span>
             <Kbd>Space</Kbd> jump
+            <span className="text-text-muted">·</span>
+            <Kbd>M</Kbd> mute
             <span className="text-text-muted">·</span>
             <Kbd>Esc</Kbd> menu
           </span>

@@ -1,5 +1,8 @@
 import { ACESFilmicToneMapping, Color, PCFShadowMap, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import { Atmosphere } from "./atmosphere/Atmosphere";
+import { Fireflies } from "./atmosphere/Fireflies";
+import { LightPool } from "./atmosphere/LightPool";
+import { AudioEngine } from "./audio/AudioEngine";
 import { Emitter } from "./core/Emitter";
 import { createFrame } from "./input/actions";
 import { InputManager } from "./input/InputManager";
@@ -15,6 +18,7 @@ import { PostProcessing } from "./rendering/PostProcessing";
 import { DEFAULT_SETTINGS, type GameSettings } from "./settings";
 import type { BiomeId } from "./world/generation/biomes";
 import { findSpawn } from "./world/spawn";
+import { createSample } from "./world/generation/TerrainSampler";
 import { World } from "./world/World";
 
 /** A snapshot of the game for HUDs and debug overlays. */
@@ -35,6 +39,7 @@ export interface GameStats {
   /** True once the terrain around the player exists. */
   ready: boolean;
   locked: boolean;
+  muted: boolean;
 }
 
 export interface GameEvents {
@@ -61,6 +66,10 @@ export class Game {
   private readonly world: World;
   private readonly player: PlayerController;
   private readonly avatar = new PlayerAvatar();
+  private readonly audio = new AudioEngine();
+  private readonly fireflies = new Fireflies();
+  private readonly lights: LightPool;
+  private readonly moodSample = createSample();
   private readonly followCamera: ThirdPersonCamera;
   private readonly post: PostProcessing;
   private readonly input = new InputManager();
@@ -75,6 +84,12 @@ export class Game {
   private ready = false;
   private lastTime = 0;
   private statsTimer = 0;
+  private moodTimer = 1;
+  private clock = 0;
+  private muted = false;
+  /** Smoothed 0..1 factors from the surroundings: how many fireflies, how windy. */
+  private fireflyLevel = 0;
+  private windiness = 0;
 
   constructor(private readonly container: HTMLElement, settings: GameSettings = DEFAULT_SETTINGS) {
     this.settings = { ...settings };
@@ -101,7 +116,8 @@ export class Game {
     this.atmosphere = new Atmosphere(this.scene);
     this.player = new PlayerController(this.world);
     this.followCamera = new ThirdPersonCamera(this.camera, this.world);
-    this.scene.add(this.avatar.root);
+    this.scene.add(this.avatar.root, this.fireflies.points);
+    this.lights = new LightPool(this.scene, this.world, 2);
     this.avatar.root.traverse((o) => (o.receiveShadow = false));
     this.post = new PostProcessing(this.renderer, this.scene, this.camera);
 
@@ -122,6 +138,7 @@ export class Game {
 
   /** Captures the mouse and starts (or resumes) playing. Call from a click or key press. */
   requestPlay(): void {
+    this.audio.start(); // audio may only start from a user gesture
     this.pointerLock.request();
   }
 
@@ -133,6 +150,7 @@ export class Game {
     this.input.preferences = { lookSensitivity: s.lookSensitivity, invertY: s.invertY };
     this.followCamera.baseFov = s.fov;
     this.atmosphere.dayLengthMinutes = s.dayLengthMinutes;
+    this.audio.setVolumes({ music: s.musicVolume, sfx: s.sfxVolume });
 
     if (s.quality !== previous.quality) {
       if (s.quality === "auto") this.adaptive.set(profileIndex(this.profile.id));
@@ -143,6 +161,11 @@ export class Game {
       this.ready = false;
       this.respawn();
     }
+  }
+
+  /** Sets the time of day (hours since midnight, 0-24). */
+  setTimeOfDay(hour: number): void {
+    this.atmosphere.setHour(hour);
   }
 
   /** Puts the player on the ground at (x, z) and the camera behind them. */
@@ -170,6 +193,7 @@ export class Game {
     const height = Math.max(1, this.container.clientHeight);
     const pixelRatio = Math.min(window.devicePixelRatio || 1, this.profile.pixelRatioCap);
     this.renderer.setPixelRatio(pixelRatio);
+    this.fireflies.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height);
     this.post.setSize(width, height, pixelRatio);
     this.camera.aspect = width / height;
@@ -185,13 +209,29 @@ export class Game {
     const playing = this.ready && this.pointerLock.locked;
     const activeInput = playing ? input : this.idleInput;
 
-    if (playing) this.player.update(dt, input, this.followCamera.yaw);
-    if (playing && input.buttons.resetCamera.pressed) this.followCamera.alignBehind(this.player.heading);
+    if (playing) {
+      this.player.update(dt, input, this.followCamera.yaw);
+      this.playSounds();
+      if (input.buttons.resetCamera.pressed) this.followCamera.alignBehind(this.player.heading);
+      if (input.buttons.toggleMute.pressed) {
+        this.muted = !this.muted;
+        this.audio.setVolumes({ muted: this.muted });
+      }
+    }
 
-    this.followCamera.update(dt, activeInput, this.player.position, this.player.sprinting);
-    this.world.update(dt, this.player.position);
-    this.atmosphere.update(playing ? dt : 0, this.player.position, this.camera);
-    this.avatar.update(playing ? dt : 0, this.player);
+    const { position } = this.player;
+    const daylight = this.atmosphere.daylight;
+    const night = 1 - daylight;
+    this.clock += dt;
+
+    this.followCamera.update(dt, activeInput, position, this.player.sprinting);
+    this.world.update(dt, position, daylight);
+    this.atmosphere.update(playing ? dt : 0, position, this.camera);
+    this.avatar.update(playing ? dt : 0, this.player, night);
+    this.lights.update(dt, position, night);
+    this.updateMood(dt, position.x, position.z);
+    this.fireflies.update(this.clock, position, this.fireflyLevel * night * night);
+    this.audio.update(dt, { daylight, altitude: position.y, windiness: this.windiness, paused: !playing });
 
     if (!this.ready && this.world.isReady()) {
       this.ready = true;
@@ -214,6 +254,31 @@ export class Game {
     }
   }
 
+  /** Footsteps, jumps and landings, with the sound of whatever the player is on. */
+  private playSounds(): void {
+    const { events, position } = this.player;
+    if (!events.step && !events.jump && events.land === 0) return;
+    const surface = this.player.onObject ? "stone" : this.player.inWater ? "water" : this.world.surfaceAt(position.x, position.z);
+    if (events.jump) this.audio.jump(surface);
+    if (events.land > 0) this.audio.land(surface, events.land);
+    if (events.step) this.audio.footstep(surface, this.player.sprinting);
+  }
+
+  /** A few times a second, works out what the surroundings mean for fireflies and wind. */
+  private updateMood(dt: number, x: number, z: number): void {
+    this.moodTimer += dt;
+    if (this.moodTimer < 0.2) return;
+    const elapsed = this.moodTimer;
+    this.moodTimer = 0;
+    const { weights, mountain } = this.world.sampleTerrain(x, z, this.moodSample);
+    // forest, desert, snow, swamp
+    const fireflies = Math.min(1, weights[0] * 0.9 + weights[3] * 1.3 + weights[1] * 0.1);
+    const wind = weights[1] * 0.3 + weights[2] * 0.35 + mountain * 0.3;
+    const k = Math.min(1, elapsed * 1.5);
+    this.fireflyLevel += (fireflies - this.fireflyLevel) * k;
+    this.windiness += (wind - this.windiness) * k;
+  }
+
   private collectStats(): GameStats {
     const { position } = this.player;
     const poi = this.world.nearestPoi(position.x, position.z);
@@ -233,6 +298,7 @@ export class Game {
       nearestPoi: poi ? { type: poi.type, distance: poi.distance } : null,
       ready: this.ready,
       locked: this.pointerLock.locked,
+      muted: this.muted,
     };
   }
 
@@ -245,6 +311,9 @@ export class Game {
     this.world.dispose();
     this.atmosphere.dispose();
     this.avatar.dispose();
+    this.audio.dispose();
+    this.fireflies.dispose();
+    this.lights.dispose();
     this.post.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
