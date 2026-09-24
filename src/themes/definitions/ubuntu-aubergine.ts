@@ -1,0 +1,30 @@
+import { defineTheme } from "../define";
+
+export default defineTheme({
+  id: "ubuntu-aubergine",
+  name: "Ubuntu Aubergine",
+  description: "Aubergine and orange, with a darker sidebar. A nod to WSL.",
+  scheme: "dark",
+  colors: {
+    canvas: "#2A0A20",
+    surface: "#381233",
+    surfaceHover: "#4A1D44",
+    border: "#5C2D57",
+    textPrimary: "#F6EEF3",
+    textSecondary: "#D3BFCD",
+    textMuted: "#A88CA3",
+    accent: "#E95420",
+    success: "#8AE234",
+    warning: "#FCAF3E",
+    danger: "#FF6B6B",
+    sidebar: "#1D0616",
+    sidebarBorder: "#3A1230",
+    sidebarText: "#CDB6C8",
+    sidebarTextStrong: "#FFFFFF",
+    sidebarTextActive: "#FFFFFF",
+    sidebarHover: "#3A1230",
+    sidebarActive: "#E9542040",
+  },
+  radius: { control: "6px", tile: "8px", card: "10px" },
+  fonts: { sans: 'Ubuntu, "Segoe UI", system-ui, sans-serif' },
+});

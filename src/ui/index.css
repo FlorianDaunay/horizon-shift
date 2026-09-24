@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Borders follow the theme: color, width (from the Tailwind extension) and style. */
+  *,
+  ::before,
+  ::after {
+    border-color: rgb(var(--color-border) / var(--alpha-border));
+    border-style: var(--border-style);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background-color: rgb(var(--color-canvas) / var(--alpha-canvas));
+    background-image: var(--effect-canvas-image);
+    color: rgb(var(--color-text-primary) / var(--alpha-text-primary));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: var(--focus-width) solid rgb(var(--color-accent));
+    outline-offset: var(--focus-offset);
+  }
+
+  canvas {
+    outline: none;
+  }
+}
